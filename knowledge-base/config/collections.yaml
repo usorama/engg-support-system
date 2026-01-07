@@ -1,0 +1,96 @@
+version: "1.0"
+
+# Qdrant Collection Definitions
+# Defines all collections for the Knowledge Graph system
+
+collections:
+  # Claude SDK Documentation
+  claude-sdk-docs:
+    description: "Official Claude Agent SDK documentation and examples"
+    source:
+      type: "github"
+      repo: "anthropics/anthropic-sdk-typescript"
+      branch: "main"
+      patterns:
+        - "docs/**/*.md"
+        - "examples/**/*.ts"
+        - "src/**/*.ts"
+    ingest:
+      enabled: true
+      schedule: "0 2 * * *"  # Daily at 2 AM
+      webhook: true
+    config:
+      vectorSize: 768  # nomic-embed-text
+      distance: "Cosine"
+      maxNodes: 100000
+
+  # Rad Engineer v2 Knowledge Graph
+  rad-engineer-kg:
+    description: "Internal rad-engineer-v2 codebase and documentation"
+    source:
+      type: "local"
+      path: "../rad-engineer"
+      patterns:
+        - "src/**/*.ts"
+        - ".claude/**/*.md"
+        - "CLAUDE.md"
+    ingest:
+      enabled: true
+      schedule: "0 3 * * *"  # Daily at 3 AM
+      webhook: false
+    config:
+      vectorSize: 768
+      distance: "Cosine"
+      maxNodes: 50000
+
+  # TypeScript Patterns Knowledge
+  typescript-patterns:
+    description: "Best practices and patterns for TypeScript development"
+    source:
+      type: "github"
+      repo: "typescript-eslint/typescript-eslint"
+      branch: "main"
+      patterns:
+        - "docs/**/*.md"
+        - "packages/**/*.ts"
+    ingest:
+      enabled: false  # Disabled by default
+      schedule: "0 4 * * 0"  # Weekly on Sunday
+      webhook: false
+    config:
+      vectorSize: 768
+      distance: "Cosine"
+      maxNodes: 100000
+
+  # Testing Patterns Knowledge
+  testing-patterns:
+    description: "Testing best practices using Bun Test"
+    source:
+      type: "github"
+      repo: "oven-sh/bun"
+      branch: "main"
+      patterns:
+        - "test/**/*.ts"
+        - "docs/**/*.md"
+    ingest:
+      enabled: false
+      schedule: "0 5 * * 0"  # Weekly
+      webhook: false
+    config:
+      vectorSize: 768
+      distance: "Cosine"
+      maxNodes: 50000
+
+# Collection Groups (for multi-collection queries)
+groups:
+  sdk-docs:
+    - claude-sdk-docs
+
+  internal:
+    - rad-engineer-kg
+
+  all:
+    - claude-sdk-docs
+    - rad-engineer-kg
+    - typescript-patterns
+    - testing-patterns

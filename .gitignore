@@ -1,0 +1,96 @@
+# engg-support-system unified gitignore
+
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+.coverage
+coverage/
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Qdrant data
+qdrant-storage/
+*.qdrant
+
+# Neo4j data
+neo4j/data/
+neo4j/logs/
+neo4j/plugins/
+
+# Graph data
+.graph_rag/
+*.graphml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker volumes
+docker-volumes/
+
+# Python
+venv/
+env/
+ENV/
+.venv
+
+# Node
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.npm
+
+# MCP
+*.mcp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Project specific
+knowledge-base/.env
+veracity-engine/.env
+infra/.env
+
+# But keep example envs
+!*.env.example
+!**/.env.example

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(bun run build)",
+      "Bash(node ingest-remaining-docs.mjs:*)",
+      "Bash(node:*)",
+      "WebSearch",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(pytest:*)",
+      "Bash(git clone:*)"
+    ]
+  }
+}

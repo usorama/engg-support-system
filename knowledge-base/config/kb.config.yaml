@@ -1,0 +1,244 @@
+version: "2.0"
+
+# Knowledge Graph Storage (Qdrant on Hostinger VPS)
+qdrant:
+  url: "${QDRANT_URL:-http://localhost:6333}"
+  apiKey: "${QDRANT_API_KEY:-}"
+  collection: "knowledge-graph"
+  timeout: 30000
+  # Vector settings
+  vectorSize: 768  # nomic-embed-text dimension
+  distance: "Cosine"
+  # Payload index (for graph filtering)
+  payloadIndexes:
+    - field: "type"
+      type: "keyword"
+    - field: "source.repo"
+      type: "keyword"
+    - field: "source.language"
+      type: "keyword"
+    - field: "metadata.createdAt"
+      type: "integer"
+
+# Ollama SLMs Configuration
+ollama:
+  vps:
+    url: "${OLLAMA_URL:-http://localhost:11434}"
+    embedModel: "${OLLAMA_EMBED_MODEL:-nomic-embed-text}"
+    summarizeModel: "${OLLAMA_SUMMARIZE_MODEL:-llama3.2}"
+    timeout: 60000
+    maxRetries: 3
+  # Local fallback (optional)
+  local:
+    enabled: true
+    url: "${LOCAL_OLLAMA_URL:-http://localhost:11434}"
+    embedModel: "${OLLAMA_EMBED_MODEL:-nomic-embed-text}"
+    summarizeModel: "${OLLAMA_SUMMARIZE_MODEL:-llama3.2}"
+    timeout: 60000
+
+# OpenAI Emergency Fallback
+openai:
+  enabled: true
+  apiKey: "${OPENAI_API_KEY}"
+  embedModel: "text-embedding-3-small"
+  summarizeModel: "gpt-4o-mini"
+  timeout: 30000
+  # Only trigger when Ollama fails completely
+  fallbackTriggers:
+    - "timeout"
+    - "container_down"
+    - "retry_exceeded"
+  maxRetriesBeforeFallback: 3
+
+# Local LanceDB Cache (hot documents)
+localCache:
+  enabled: true
+  path: "${HOME}/.cache/rad-engineer/kb"
+  maxSize: 500  # MB
+  maxDocuments: 10000
+  # Vector settings
+  dimensions: 768
+  indexType: "IVF"
+  # Cache thresholds
+  promotionThreshold: 0.6  # Hot temperature
+  demotionThreshold: 0.3   # Cold temperature
+  # Refresh intervals (minutes)
+  refreshInterval: 60
+  syncInterval: 10
+
+# Knowledge Graph Settings
+knowledgeGraph:
+  enabled: true
+  # Relationship types from relationships.schema.yaml
+  relationshipSchema: "./config/relationships.schema.yaml"
+  # Max depth for graph traversal
+  maxTraversalDepth: 3
+  # Min relationship strength to store
+  minRelationshipStrength: 0.3
+  # Graph enrichment during ingestion
+  autoEnrichment:
+    enabled: true
+    extractCodeDependencies: true
+    extractDocumentReferences: true
+    extractTemporalRelationships: true
+
+# Hybrid Search Settings
+search:
+  # Semantic vector search (primary)
+  semantic:
+    enabled: true
+    weight: 0.7
+    topK: 10
+    minScore: 0.5
+  # Graph traversal (secondary)
+  graph:
+    enabled: true
+    weight: 0.3
+    maxDepth: 2
+    followRelationships:
+      - REFERENCES
+      - DEPENDS_ON
+      - IMPLEMENTS
+      - EXTENDS
+      - RELATED_TO
+  # Fusion strategy
+  fusion:
+    strategy: "rrf"  # Reciprocal Rank Fusion
+    k: 60  # RRF constant
+  # Reranking (optional)
+  rerank:
+    enabled: false
+    provider: "none"  # "cohere" or "none"
+
+# Summarization Settings (evidence-based)
+summarization:
+  enabled: true
+  provider: "ollama"  # ollama, openai
+  model: "${OLLAMA_SUMMARIZE_MODEL:-llama3.2}"
+  maxContextLength: 8000
+  citationRequired: true
+  citationFormat: "markdown"  # markdown, json
+  citationSources: 3  # Max sources to cite
+
+# Ingestion Settings
+ingestion:
+  # Document chunking
+  chunking:
+    maxTokens: 800
+    overlap: 0.2  # 20% overlap
+    codeAware: true
+  # Batch processing
+  batchSize: 50
+  parallelism: 2
+  # GitHub integration
+  github:
+    token: "${GITHUB_TOKEN}"
+    webhookSecret: "${GITHUB_WEBHOOK_SECRET}"
+    rateLimit: 5000
+    # Supported file types
+    fileTypes:
+      - ".md"
+      - ".txt"
+      - ".ts"
+      - ".js"
+      - ".py"
+      - ".yaml"
+      - ".yml"
+      - ".json"
+
+# Web Search Fallback (tier-3)
+webSearch:
+  enabled: true
+  provider: "agent"  # agent-based search
+  timeout: 30000
+  maxResults: 5
+  # Result caching
+  cacheDuration: 86400  # 24 hours
+  # Auto-promotion to KB
+  autoPromote: true
+  # Sources to search
+  sources:
+    - "docs.anthropic.com"
+    - "github.com"
+    - "npmjs.com"
+    - "pypi.org"
+
+# MCP Server Configuration
+mcp:
+  enabled: true
+  port: 3000
+  host: "0.0.0.0"
+  # Authentication
+  auth:
+    enabled: true
+    apiKey: "${KB_API_KEY}"
+  # Rate limiting
+  rateLimit:
+    enabled: true
+    requestsPerMinute: 100
+    burst: 20
+  # WebSocket
+  websocket:
+    enabled: true
+    heartbeatInterval: 30000
+  # Endpoints
+  endpoints:
+    query: "/mcp/query"
+    ingest: "/mcp/ingest"
+    stats: "/mcp/stats"
+    health: "/health"
+
+# API Configuration
+api:
+  port: 3000
+  host: "0.0.0.0"
+  cors:
+    enabled: true
+    origins: ["*"]
+  compression: true
+
+# Logging
+logging:
+  level: "${LOG_LEVEL:-info}"
+  format: "json"
+  # File logging
+  file:
+    enabled: true
+    path: "./logs"
+    maxSize: "100M"
+    maxFiles: 10
+  # Structured fields
+  fields:
+    timestamp: true
+    level: true
+    context: true
+    traceId: true
+
+# Monitoring & Metrics
+monitoring:
+  enabled: true
+  # Metrics collection
+  metrics:
+    queryLatency: true
+    cacheHitRate: true
+    temperature: true
+    ingestionErrors: true
+  # Health checks
+  health:
+    interval: 30  # seconds
+    timeout: 10
+  # Performance tracking
+  performance:
+    trackSlowQueries: true
+    slowQueryThreshold: 1000  # ms
+
+# Security
+security:
+  # Input validation
+  validateInput: true
+  # Rate limiting per client
+  rateLimitPerClient: true
+  # Sanitization
+  sanitizeHtml: true
+  # API key rotation
+  apiKeyRotationDays: 90

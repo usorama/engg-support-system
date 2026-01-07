@@ -1,0 +1,185 @@
+#!/bin/bash
+#
+# Veracity Daemon Control Script
+#
+# Usage:
+#   veracityd start        Start the daemon
+#   veracityd stop         Stop the daemon
+#   veracityd restart      Restart the daemon
+#   veracityd status       Check daemon status
+#   veracityd register     Register a project
+#   veracityd unregister   Unregister a project
+#   veracityd list         List registered projects
+#   veracityd index        Index all projects once
+#
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERACITY_ROOT="$(dirname "$SCRIPT_DIR")"
+DAEMON_SCRIPT="$VERACITY_ROOT/core/watcher_daemon.py"
+REGISTRY_SCRIPT="$VERACITY_ROOT/core/project_registry.py"
+PID_FILE="/tmp/veracity-daemon.pid"
+LOG_FILE="/tmp/veracity-daemon.log"
+
+# Detect Python
+PYTHON=""
+if command -v /opt/homebrew/bin/python3.11 &> /dev/null; then
+    PYTHON="/opt/homebrew/bin/python3.11"
+elif command -v python3.11 &> /dev/null; then
+    PYTHON="$(which python3.11)"
+elif command -v python3 &> /dev/null; then
+    PYTHON="$(which python3)"
+fi
+
+if [ -z "$PYTHON" ]; then
+    echo "ERROR: Python 3 not found"
+    exit 1
+fi
+
+# Export PYTHONPATH
+export PYTHONPATH="$VERACITY_ROOT"
+
+start_daemon() {
+    if [ -f "$PID_FILE" ]; then
+        pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Daemon already running (PID: $pid)"
+            exit 0
+        fi
+        rm -f "$PID_FILE"
+    fi
+
+    echo "Starting Veracity daemon..."
+    nohup "$PYTHON" "$DAEMON_SCRIPT" --daemon >> "$LOG_FILE" 2>&1 &
+    echo $! > "$PID_FILE"
+    echo "Daemon started (PID: $(cat "$PID_FILE"))"
+    echo "Log file: $LOG_FILE"
+}
+
+stop_daemon() {
+    if [ -f "$PID_FILE" ]; then
+        pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping Veracity daemon (PID: $pid)..."
+            kill "$pid"
+            rm -f "$PID_FILE"
+            echo "Daemon stopped"
+        else
+            echo "Daemon not running (stale PID file)"
+            rm -f "$PID_FILE"
+        fi
+    else
+        # Try to find by process name
+        pid=$(pgrep -f "watcher_daemon.py" 2>/dev/null || true)
+        if [ -n "$pid" ]; then
+            echo "Stopping Veracity daemon (PID: $pid)..."
+            kill "$pid"
+            echo "Daemon stopped"
+        else
+            echo "Daemon not running"
+        fi
+    fi
+}
+
+status_daemon() {
+    if [ -f "$PID_FILE" ]; then
+        pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Daemon is running (PID: $pid)"
+
+            # Show watched projects
+            echo ""
+            echo "Registered projects:"
+            "$PYTHON" "$REGISTRY_SCRIPT" list
+            exit 0
+        fi
+    fi
+
+    # Check by process name
+    pid=$(pgrep -f "watcher_daemon.py" 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+        echo "Daemon is running (PID: $pid)"
+        exit 0
+    fi
+
+    echo "Daemon is not running"
+    exit 1
+}
+
+register_project() {
+    if [ -z "$1" ] || [ -z "$2" ]; then
+        echo "Usage: veracityd register <name> <path> [--target-dirs dir1 dir2 ...]"
+        exit 1
+    fi
+
+    "$PYTHON" "$REGISTRY_SCRIPT" register "$@"
+
+    # Trigger immediate re-index
+    echo ""
+    echo "Indexing project..."
+    "$PYTHON" "$VERACITY_ROOT/core/build_graph.py" \
+        --project-name "$1" \
+        --root-dir "$2" \
+        ${3:+--target-dirs "${@:3}"}
+}
+
+case "${1:-help}" in
+    start)
+        start_daemon
+        ;;
+    stop)
+        stop_daemon
+        ;;
+    restart)
+        stop_daemon
+        sleep 1
+        start_daemon
+        ;;
+    status)
+        status_daemon
+        ;;
+    register)
+        shift
+        register_project "$@"
+        ;;
+    unregister)
+        shift
+        "$PYTHON" "$REGISTRY_SCRIPT" unregister "$@"
+        ;;
+    list)
+        "$PYTHON" "$REGISTRY_SCRIPT" list
+        ;;
+    index)
+        echo "Indexing all registered projects..."
+        "$PYTHON" "$DAEMON_SCRIPT" --once
+        ;;
+    logs)
+        if [ -f "$LOG_FILE" ]; then
+            tail -f "$LOG_FILE"
+        else
+            echo "No log file found at $LOG_FILE"
+        fi
+        ;;
+    help|--help|-h|*)
+        echo "Veracity Daemon Control"
+        echo ""
+        echo "Usage: veracityd <command> [options]"
+        echo ""
+        echo "Commands:"
+        echo "  start                   Start the daemon"
+        echo "  stop                    Stop the daemon"
+        echo "  restart                 Restart the daemon"
+        echo "  status                  Check daemon status and list projects"
+        echo "  register <name> <path>  Register a project for watching"
+        echo "  unregister <name>       Unregister a project"
+        echo "  list                    List registered projects"
+        echo "  index                   Index all projects once"
+        echo "  logs                    Tail the daemon log"
+        echo ""
+        echo "Examples:"
+        echo "  veracityd register pinglearn ~/Projects/pinglearn/pinglearn-app"
+        echo "  veracityd start"
+        echo "  veracityd status"
+        ;;
+esac

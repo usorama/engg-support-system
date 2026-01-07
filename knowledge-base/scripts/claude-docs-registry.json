@@ -1,0 +1,395 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-01-07",
+  "baseUrl": "https://code.claude.com/docs/en",
+  "docs": [
+    {
+      "category": "getting-started",
+      "title": "Overview",
+      "url": "https://code.claude.com/docs/en/overview",
+      "slug": "overview",
+      "priority": 1
+    },
+    {
+      "category": "getting-started",
+      "title": "Quickstart",
+      "url": "https://code.claude.com/docs/en/quickstart",
+      "slug": "quickstart",
+      "priority": 2
+    },
+    {
+      "category": "getting-started",
+      "title": "Setup",
+      "url": "https://code.claude.com/docs/en/setup",
+      "slug": "setup",
+      "priority": 3
+    },
+    {
+      "category": "core-features",
+      "title": "Skills",
+      "url": "https://code.claude.com/docs/en/skills",
+      "slug": "skills",
+      "priority": 10
+    },
+    {
+      "category": "core-features",
+      "title": "MCP",
+      "url": "https://code.claude.com/docs/en/mcp",
+      "slug": "mcp",
+      "priority": 11
+    },
+    {
+      "category": "core-features",
+      "title": "Slash Commands",
+      "url": "https://code.claude.com/docs/en/slash-commands",
+      "slug": "slash-commands",
+      "priority": 12
+    },
+    {
+      "category": "core-features",
+      "title": "CLI Reference",
+      "url": "https://code.claude.com/docs/en/cli-reference",
+      "slug": "cli-reference",
+      "priority": 13
+    },
+    {
+      "category": "core-features",
+      "title": "Plugins",
+      "url": "https://code.claude.com/docs/en/plugins",
+      "slug": "plugins",
+      "priority": 14
+    },
+    {
+      "category": "core-features",
+      "title": "Discover Plugins",
+      "url": "https://code.claude.com/docs/en/discover-plugins",
+      "slug": "discover-plugins",
+      "priority": 15
+    },
+    {
+      "category": "core-features",
+      "title": "Plugin Marketplaces",
+      "url": "https://code.claude.com/docs/en/plugin-marketplaces",
+      "slug": "plugin-marketplaces",
+      "priority": 16
+    },
+    {
+      "category": "core-features",
+      "title": "Plugins Reference",
+      "url": "https://code.claude.com/docs/en/plugins-reference",
+      "slug": "plugins-reference",
+      "priority": 17
+    },
+    {
+      "category": "core-features",
+      "title": "Sub-agents",
+      "url": "https://code.claude.com/docs/en/sub-agents",
+      "slug": "sub-agents",
+      "priority": 18
+    },
+    {
+      "category": "core-features",
+      "title": "Memory",
+      "url": "https://code.claude.com/docs/en/memory",
+      "slug": "memory",
+      "priority": 19
+    },
+    {
+      "category": "configuration",
+      "title": "Settings",
+      "url": "https://code.claude.com/docs/en/settings",
+      "slug": "settings",
+      "priority": 30
+    },
+    {
+      "category": "configuration",
+      "title": "Model Config",
+      "url": "https://code.claude.com/docs/en/model-config",
+      "slug": "model-config",
+      "priority": 31
+    },
+    {
+      "category": "configuration",
+      "title": "Terminal Config",
+      "url": "https://code.claude.com/docs/en/terminal-config",
+      "slug": "terminal-config",
+      "priority": 32
+    },
+    {
+      "category": "configuration",
+      "title": "Network Config",
+      "url": "https://code.claude.com/docs/en/network-config",
+      "slug": "network-config",
+      "priority": 33
+    },
+    {
+      "category": "configuration",
+      "title": "Output Styles",
+      "url": "https://code.claude.com/docs/en/output-styles",
+      "slug": "output-styles",
+      "priority": 34
+    },
+    {
+      "category": "configuration",
+      "title": "Statusline",
+      "url": "https://code.claude.com/docs/en/statusline",
+      "slug": "statusline",
+      "priority": 35
+    },
+    {
+      "category": "configuration",
+      "title": "Interactive Mode",
+      "url": "https://code.claude.com/docs/en/interactive-mode",
+      "slug": "interactive-mode",
+      "priority": 36
+    },
+    {
+      "category": "configuration",
+      "title": "Headless",
+      "url": "https://code.claude.com/docs/en/headless",
+      "slug": "headless",
+      "priority": 37
+    },
+    {
+      "category": "configuration",
+      "title": "Checkpointing",
+      "url": "https://code.claude.com/docs/en/checkpointing",
+      "slug": "checkpointing",
+      "priority": 38
+    },
+    {
+      "category": "extensions",
+      "title": "VS Code",
+      "url": "https://code.claude.com/docs/en/vs-code",
+      "slug": "vs-code",
+      "priority": 40
+    },
+    {
+      "category": "extensions",
+      "title": "JetBrains",
+      "url": "https://code.claude.com/docs/en/jetbrains",
+      "slug": "jetbrains",
+      "priority": 41
+    },
+    {
+      "category": "extensions",
+      "title": "Chrome",
+      "url": "https://code.claude.com/docs/en/chrome",
+      "slug": "chrome",
+      "priority": 42
+    },
+    {
+      "category": "extensions",
+      "title": "Desktop",
+      "url": "https://code.claude.com/docs/en/desktop",
+      "slug": "desktop",
+      "priority": 43
+    },
+    {
+      "category": "extensions",
+      "title": "Claude Code on the Web",
+      "url": "https://code.claude.com/docs/en/claude-code-on-the-web",
+      "slug": "claude-code-on-the-web",
+      "priority": 44
+    },
+    {
+      "category": "integrations",
+      "title": "Hooks",
+      "url": "https://code.claude.com/docs/en/hooks",
+      "slug": "hooks",
+      "priority": 50
+    },
+    {
+      "category": "integrations",
+      "title": "Hooks Guide",
+      "url": "https://code.claude.com/docs/en/hooks-guide",
+      "slug": "hooks-guide",
+      "priority": 51
+    },
+    {
+      "category": "integrations",
+      "title": "GitHub Actions",
+      "url": "https://code.claude.com/docs/en/github-actions",
+      "slug": "github-actions",
+      "priority": 52
+    },
+    {
+      "category": "integrations",
+      "title": "GitLab CI/CD",
+      "url": "https://code.claude.com/docs/en/gitlab-ci-cd",
+      "slug": "gitlab-ci-cd",
+      "priority": 53
+    },
+    {
+      "category": "integrations",
+      "title": "DevContainer",
+      "url": "https://code.claude.com/docs/en/devcontainer",
+      "slug": "devcontainer",
+      "priority": 54
+    },
+    {
+      "category": "integrations",
+      "title": "Third-party Integrations",
+      "url": "https://code.claude.com/docs/en/third-party-integrations",
+      "slug": "third-party-integrations",
+      "priority": 55
+    },
+    {
+      "category": "platforms",
+      "title": "Amazon Bedrock",
+      "url": "https://code.claude.com/docs/en/amazon-bedrock",
+      "slug": "amazon-bedrock",
+      "priority": 60
+    },
+    {
+      "category": "platforms",
+      "title": "Google Vertex AI",
+      "url": "https://code.claude.com/docs/en/google-vertex-ai",
+      "slug": "google-vertex-ai",
+      "priority": 61
+    },
+    {
+      "category": "platforms",
+      "title": "Microsoft Foundry",
+      "url": "https://code.claude.com/docs/en/microsoft-foundry",
+      "slug": "microsoft-foundry",
+      "priority": 62
+    },
+    {
+      "category": "platforms",
+      "title": "Slack",
+      "url": "https://code.claude.com/docs/en/slack",
+      "slug": "slack",
+      "priority": 63
+    },
+    {
+      "category": "platforms",
+      "title": "LLM Gateway",
+      "url": "https://code.claude.com/docs/en/llm-gateway",
+      "slug": "llm-gateway",
+      "priority": 64
+    },
+    {
+      "category": "operations",
+      "title": "Analytics",
+      "url": "https://code.claude.com/docs/en/analytics",
+      "slug": "analytics",
+      "priority": 70
+    },
+    {
+      "category": "operations",
+      "title": "Costs",
+      "url": "https://code.claude.com/docs/en/costs",
+      "slug": "costs",
+      "priority": 71
+    },
+    {
+      "category": "operations",
+      "title": "Monitoring Usage",
+      "url": "https://code.claude.com/docs/en/monitoring-usage",
+      "slug": "monitoring-usage",
+      "priority": 72
+    },
+    {
+      "category": "operations",
+      "title": "Data Usage",
+      "url": "https://code.claude.com/docs/en/data-usage",
+      "slug": "data-usage",
+      "priority": 73
+    },
+    {
+      "category": "security",
+      "title": "Security",
+      "url": "https://code.claude.com/docs/en/security",
+      "slug": "security",
+      "priority": 80
+    },
+    {
+      "category": "security",
+      "title": "Sandboxing",
+      "url": "https://code.claude.com/docs/en/sandboxing",
+      "slug": "sandboxing",
+      "priority": 81
+    },
+    {
+      "category": "security",
+      "title": "IAM",
+      "url": "https://code.claude.com/docs/en/iam",
+      "slug": "iam",
+      "priority": 82
+    },
+    {
+      "category": "legal",
+      "title": "Legal and Compliance",
+      "url": "https://code.claude.com/docs/en/legal-and-compliance",
+      "slug": "legal-and-compliance",
+      "priority": 90
+    },
+    {
+      "category": "support",
+      "title": "Troubleshooting",
+      "url": "https://code.claude.com/docs/en/troubleshooting",
+      "slug": "troubleshooting",
+      "priority": 100
+    },
+    {
+      "category": "support",
+      "title": "Common Workflows",
+      "url": "https://code.claude.com/docs/en/common-workflows",
+      "slug": "common-workflows",
+      "priority": 101
+    }
+  ],
+  "categories": {
+    "getting-started": {
+      "name": "Getting Started",
+      "description": "Introduction and setup guides",
+      "priority": 1
+    },
+    "core-features": {
+      "name": "Core Features",
+      "description": "Essential Claude Code features",
+      "priority": 2
+    },
+    "configuration": {
+      "name": "Configuration",
+      "description": "Settings and configuration options",
+      "priority": 3
+    },
+    "extensions": {
+      "name": "Extensions",
+      "description": "IDE and browser extensions",
+      "priority": 4
+    },
+    "integrations": {
+      "name": "Integrations",
+      "description": "CI/CD and development tool integrations",
+      "priority": 5
+    },
+    "platforms": {
+      "name": "Platforms",
+      "description": "Cloud platform integrations",
+      "priority": 6
+    },
+    "operations": {
+      "name": "Operations",
+      "description": "Monitoring, analytics, and cost management",
+      "priority": 7
+    },
+    "security": {
+      "name": "Security",
+      "description": "Security features and compliance",
+      "priority": 8
+    },
+    "legal": {
+      "name": "Legal",
+      "description": "Legal and compliance information",
+      "priority": 9
+    },
+    "support": {
+      "name": "Support",
+      "description": "Help and troubleshooting",
+      "priority": 10
+    }
+  }
+}

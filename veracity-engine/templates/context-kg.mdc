@@ -1,0 +1,19 @@
+---
+description: Enforces the use of the Ground-Truth Context System Knowledge Graph for architectural context.
+globs: **/*
+---
+
+# Ground-Truth Context System (GTCS) Protocol
+
+Before answering questions about code logic, cross-service dependencies, or performing complex refactors, you MUST consult the Ground-Truth Context System.
+
+## Required Action
+Run the following command to get a deterministic Technical Brief:
+```bash
+python3 ./core/ask_codebase.py --project-name {{project_name}} "Identify relationships and architectural constraints related to: [your focus]"
+```
+
+## Protocol
+1.  **Trust Code Truth**: Prioritize the `code_truth` findings from the engine over any local assumptions.
+2.  **Verify Staleness**: If the engine flags a document as `STALE_DOC`, do not trust its claims without verification.
+3.  **Audit Trail**: Every query is logged for veracity and auditability.

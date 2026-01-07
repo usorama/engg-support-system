@@ -1,0 +1,58 @@
+# OS
+.DS_Store
+
+# Environment and Secrets (NEVER commit these)
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Veracity Engine Runtime
+.graph_rag/
+.veracity_venv/
+.graph_hashes_*.json
+*/.graph_hashes_*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+*.egg
+.eggs/
+.mypy_cache/
+.ruff_cache/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build Artifacts
+build/
+dist/
+
+# Node.js
+node_modules/
+ui/node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation builds
+docs/repo-swarm/
+site/
+
+# Logs
+*.log
+logs/

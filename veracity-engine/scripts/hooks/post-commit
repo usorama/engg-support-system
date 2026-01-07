@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# Git Post-Commit Hook for KG Auto-Indexing (STORY-017)
+#
+# Automatically re-indexes the veracity-engine repository after each commit.
+# Install: cp scripts/hooks/post-commit .git/hooks/post-commit
+#
+# To disable temporarily: export VERACITY_SKIP_INDEX=1
+#
+
+# Skip if disabled
+if [ "$VERACITY_SKIP_INDEX" = "1" ]; then
+    echo "[veracity] Skipping auto-index (VERACITY_SKIP_INDEX=1)"
+    exit 0
+fi
+
+# Get repo root
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Check if self-index script exists
+if [ ! -f "$REPO_ROOT/scripts/self-index.sh" ]; then
+    echo "[veracity] Warning: self-index.sh not found, skipping auto-index"
+    exit 0
+fi
+
+# Run indexing in background (non-blocking)
+echo "[veracity] Triggering background re-index..."
+nohup "$REPO_ROOT/scripts/self-index.sh" > /dev/null 2>&1 &
+
+exit 0

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Unique identifier for this launch agent -->
+    <key>Label</key>
+    <string>com.veracity.daemon</string>
+
+    <!-- Program to run -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3.11</string>
+        <string>VERACITY_ROOT_PLACEHOLDER/core/watcher_daemon.py</string>
+        <string>--daemon</string>
+    </array>
+
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>VERACITY_ROOT_PLACEHOLDER</string>
+        <key>NEO4J_URI</key>
+        <string>bolt://localhost:7687</string>
+        <key>NEO4J_USER</key>
+        <string>neo4j</string>
+        <key>NEO4J_PASSWORD</key>
+        <string>password</string>
+    </dict>
+
+    <!-- Start automatically on login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart if it exits -->
+    <key>KeepAlive</key>
+    <dict>
+        <!-- Only restart on unexpected exits -->
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>VERACITY_ROOT_PLACEHOLDER</string>
+
+    <!-- Log files -->
+    <key>StandardOutPath</key>
+    <string>/tmp/veracity-daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/veracity-daemon.err</string>
+
+    <!-- Throttle restarts (wait 10 seconds between restarts) -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Nice level (lower priority) -->
+    <key>Nice</key>
+    <integer>5</integer>
+</dict>
+</plist>

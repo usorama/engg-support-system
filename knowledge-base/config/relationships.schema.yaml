@@ -1,0 +1,322 @@
+version: "1.0"
+
+# Knowledge Graph Relationship Schema
+# Defines all relationship types between nodes in the knowledge graph
+
+relationship_types:
+  # Document Relationships
+  REFERENCES:
+    description: "Document A cites or references Document B"
+    strength_range: [0.5, 1.0]
+    directional: true
+    inverse: IS_REFERENCED_BY
+    metadata_fields:
+      - "context"
+      - "line_number"
+      - "citation_type"
+
+  IS_REFERENCED_BY:
+    description: "Document B is cited or referenced by Document A"
+    strength_range: [0.5, 1.0]
+    directional: true
+    inverse: REFERENCES
+    metadata_fields:
+      - "context"
+      - "line_number"
+
+  RELATED_TO:
+    description: "Conceptual or thematic relationship between documents"
+    strength_range: [0.1, 0.9]
+    directional: false
+    inverse: RELATED_TO
+    metadata_fields:
+      - "topic"
+      - "similarity_score"
+
+  EXTENDS:
+    description: "Document A extends or builds upon Document B"
+    strength_range: [0.8, 1.0]
+    directional: true
+    inverse: IS_EXTENDED_BY
+    metadata_fields:
+      - "extension_type"
+      - "new_features"
+
+  IS_EXTENDED_BY:
+    description: "Document B is extended by Document A"
+    strength_range: [0.8, 1.0]
+    directional: true
+    inverse: EXTENDS
+
+  SUPERSEDES:
+    description: "Document A replaces or deprecates Document B"
+    strength_range: [0.9, 1.0]
+    directional: true
+    inverse: IS_SUPERSEDED_BY
+    metadata_fields:
+      - "deprecation_reason"
+      - "migration_guide"
+
+  IS_SUPERSEDED_BY:
+    description: "Document B is replaced by Document A"
+    strength_range: [0.9, 1.0]
+    directional: true
+    inverse: SUPERSEDES
+
+  # Code Relationships
+  DEPENDS_ON:
+    description: "Code A depends on Code B (imports, requires, uses)"
+    strength_range: [0.5, 1.0]
+    directional: true
+    inverse: IS_DEPENDENCY_OF
+    metadata_fields:
+      - "import_type"
+      - "usage_context"
+
+  IS_DEPENDENCY_OF:
+    description: "Code B is a dependency of Code A"
+    strength_range: [0.5, 1.0]
+    directional: true
+    inverse: DEPENDS_ON
+
+  IMPLEMENTS:
+    description: "Code A implements an interface, class, or protocol defined in Code B"
+    strength_range: [0.8, 1.0]
+    directional: true
+    inverse: IS_IMPLEMENTED_BY
+    metadata_fields:
+      - "interface_name"
+      - "methods_implemented"
+
+  IS_IMPLEMENTED_BY:
+    description: "Code B is implemented by Code A"
+    strength_range: [0.8, 1.0]
+    directional: true
+    inverse: IMPLEMENTS
+
+  EXTENDS_CLASS:
+    description: "Class A inherits from or extends Class B"
+    strength_range: [0.9, 1.0]
+    directional: true
+    inverse: IS_EXTENDED_BY_CLASS
+    metadata_fields:
+      - "inheritance_type"
+      - "overridden_methods"
+
+  IS_EXTENDED_BY_CLASS:
+    description: "Class B is inherited by Class A"
+    strength_range: [0.9, 1.0]
+    directional: true
+    inverse: EXTENDS_CLASS
+
+  CALLS:
+    description: "Function A calls Function B"
+    strength_range: [0.3, 1.0]
+    directional: true
+    inverse: IS_CALLED_BY
+    metadata_fields:
+      - "call_frequency"
+      - "call_context"
+
+  IS_CALLED_BY:
+    description: "Function B is called by Function A"
+    strength_range: [0.3, 1.0]
+    directional: true
+    inverse: CALLS
+
+  # Temporal Relationships
+  PRECEDES:
+    description: "Document or Event A comes before Document or Event B in sequence"
+    strength_range: [0.5, 1.0]
+    directional: true
+    inverse: FOLLOWS
+    metadata_fields:
+      - "sequence_order"
+      - "time_delta"
+
+  FOLLOWS:
+    description: "Document or Event A comes after Document or Event B in sequence"
+    strength_range: [0.5, 1.0]
+    directional: true
+    inverse: PRECEDES
+    metadata_fields:
+      - "sequence_order"
+      - "time_delta"
+
+  # Concept Relationships
+  CONCEPT_RELATES:
+    description: "Concept A is related to Concept B thematically"
+    strength_range: [0.1, 0.8]
+    directional: false
+    inverse: CONCEPT_RELATES
+    metadata_fields:
+      - "relationship_type"
+      - "domain"
+
+  CONCEPT_SIMILAR:
+    description: "Concept A is similar to Concept B"
+    strength_range: [0.5, 0.9]
+    directional: false
+    inverse: CONCEPT_SIMILAR
+    metadata_fields:
+      - "similarity_score"
+      - "shared_features"
+
+  # Part-Whole Relationships
+  PART_OF:
+    description: "Entity A is a component or part of Entity B"
+    strength_range: [0.7, 1.0]
+    directional: true
+    inverse: HAS_PART
+    metadata_fields:
+      - "part_type"
+      - "position"
+
+  HAS_PART:
+    description: "Entity B contains or has Entity A as a part"
+    strength_range: [0.7, 1.0]
+    directional: true
+    inverse: PART_OF
+    metadata_fields:
+      - "part_type"
+      - "position"
+
+  # Example Relationships
+  EXAMPLE_OF:
+    description: "Code or Document A is an example of Concept B"
+    strength_range: [0.6, 1.0]
+    directional: true
+    inverse: HAS_EXAMPLE
+    metadata_fields:
+      - "example_type"
+      - "language"
+
+  HAS_EXAMPLE:
+    description: "Concept B has Code or Document A as an example"
+    strength_range: [0.6, 1.0]
+    directional: true
+    inverse: EXAMPLE_OF
+
+  # Documentation Relationships
+  DESCRIBES:
+    description: "Document A describes Code or System B"
+    strength_range: [0.7, 1.0]
+    directional: true
+    inverse: IS_DESCRIBED_BY
+    metadata_fields:
+      - "description_type"
+      - "coverage"
+
+  IS_DESCRIBED_BY:
+    description: "Code or System B is described by Document A"
+    strength_range: [0.7, 1.0]
+    directional: true
+    inverse: DESCRIBES
+
+  # Test Relationships
+  TESTS:
+    description: "Test A tests Code or System B"
+    strength_range: [0.8, 1.0]
+    directional: true
+    inverse: IS_TESTED_BY
+    metadata_fields:
+      - "test_type"
+      - "coverage"
+
+  IS_TESTED_BY:
+    description: "Code or System B is tested by Test A"
+    strength_range: [0.8, 1.0]
+    directional: true
+    inverse: TESTS
+
+  # Configuration Relationships
+  CONFIGURES:
+    description: "Configuration A configures System B"
+    strength_range: [0.8, 1.0]
+    directional: true
+    inverse: IS_CONFIGURED_BY
+    metadata_fields:
+      - "config_type"
+      - "parameters"
+
+  IS_CONFIGURED_BY:
+    description: "System B is configured by Configuration A"
+    strength_range: [0.8, 1.0]
+    directional: true
+    inverse: CONFIGURES
+
+# Relationship Extraction Rules
+extraction_rules:
+  code:
+    # Extract import/require statements as DEPENDS_ON
+    extract_imports: true
+    # Extract class inheritance as EXTENDS_CLASS
+    extract_inheritance: true
+    # Extract interface implementation as IMPLEMENTS
+    extract_interfaces: true
+    # Extract function calls as CALLS
+    extract_calls: true
+    # Extract test relationships as TESTS
+    extract_tests: true
+
+  markdown:
+    # Extract links as REFERENCES
+    extract_links: true
+    # Extract code blocks as EXAMPLE_OF
+    extract_examples: true
+    # Extract headers as CONCEPT_RELATES
+    extract_concepts: true
+
+  temporal:
+    # Extract file timestamps as PRECEDES/FOLLOWS
+    extract_timestamps: true
+    # Extract git history as PRECEDES/FOLLOWS
+    extract_git_history: true
+
+# Relationship Strength Scoring
+strength_scoring:
+  # Base strength by relationship type
+  base_strength:
+    REFERENCES: 0.7
+    DEPENDS_ON: 0.8
+    IMPLEMENTS: 0.9
+    EXTENDS_CLASS: 0.9
+    SUPERSEDES: 0.95
+    TESTS: 0.85
+    DESCRIBES: 0.75
+
+  # Boost factors
+  boost_factors:
+    # Direct mention in text
+    direct_mention: 1.2
+    # Multiple occurrences
+    multiple_occurrences: 1.1
+    # Same directory/package
+    same_package: 1.15
+    # Explicitly documented
+    explicit_documentation: 1.3
+
+  # Penalty factors
+  penalty_factors:
+    # Cross-package reference
+    cross_package: 0.9
+    # Indirect reference
+    indirect: 0.7
+    # Deprecated reference
+    deprecated: 0.5
+
+# Graph Traversal Settings
+traversal:
+  # Max depth for graph traversal
+  max_depth: 3
+  # Preferred relationships to follow
+  preferred_paths:
+    - [REFERENCES, DESCRIBES]
+    - [DEPENDS_ON, CALLS]
+    - [IMPLEMENTS, EXTENDS_CLASS]
+    - [RELATED_TO, CONCEPT_RELATES]
+  # Relationships to avoid (cycles)
+  avoid_cycles:
+    - [EXTENDS_CLASS, IS_EXTENDED_BY_CLASS]
+    - [DEPENDS_ON, IS_DEPENDENCY_OF]
+    - [PRECEDES, FOLLOWS]

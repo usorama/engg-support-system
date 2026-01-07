@@ -1,0 +1,30 @@
+# Veracity Engine Dependencies
+# Pinned to exact versions for reproducibility (STORY-002)
+# Last updated: 2025-12-30
+
+# Database
+neo4j==5.28.2
+
+# Ollama Client (LLM/Embeddings)
+ollama==0.6.1
+
+# Configuration Management (STORY-001)
+pydantic==2.12.5
+pydantic-settings==2.11.0
+PyYAML==6.0.3
+
+# Utilities
+python-dotenv==1.0.1
+
+# Observability (STORY-004)
+structlog==25.2.0
+
+# MCP Server (STORY-018)
+mcp>=1.2.0
+
+# File System Watcher (STORY-019)
+watchdog>=4.0.0
+
+# Testing (see requirements-dev.txt for full dev dependencies)
+pytest==8.4.2
+requests>=2.31.0  # For test_observability.py health check tests

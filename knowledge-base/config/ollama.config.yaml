@@ -1,0 +1,162 @@
+version: "1.0"
+
+# Ollama SLM Configuration
+# Primary embedding and summarization provider for Knowledge Graph
+
+models:
+  # Embedding Models
+  embedding:
+    primary:
+      name: "nomic-embed-text"
+      dimension: 768
+      contextLength: 8192
+      # Embedding settings
+      batchsize: 32
+      timeout: 30000
+      maxRetries: 3
+      # Retry backoff (ms)
+      retryBackoff:
+        initial: 1000
+        multiplier: 2
+        maximum: 10000
+
+    fallback:
+      name: "mxbai-embed-large"
+      dimension: 1024
+      contextLength: 512
+      # Only use if primary fails
+      enableOnFailure: true
+
+  # Summarization Models
+  summarization:
+    primary:
+      name: "llama3.2"
+      contextLength: 128000
+      # Summarization settings
+      temperature: 0.3  # Low temp for deterministic results
+      maxTokens: 4096
+      timeout: 60000
+      maxRetries: 3
+      # Evidence-based summarization
+      evidenceBased: true
+      citationRequired: true
+      maxCitations: 3
+
+    fallback:
+      name: "mistral-nemo"
+      contextLength: 128000
+      temperature: 0.3
+      maxTokens: 4096
+      enableOnFailure: true
+
+# VPS Ollama Instance
+vps:
+  url: "${OLLAMA_URL:-http://localhost:11434}"
+  enabled: true
+  # Connection settings
+  timeout: 60000
+  keepAlive: true
+  # Concurrency
+  maxConcurrent: 5
+  # Resource limits
+  maxMemoryGB: 16
+  maxGPUs: 1
+
+# Local Ollama Instance (fallback)
+local:
+  url: "${LOCAL_OLLAMA_URL:-http://localhost:11434}"
+  enabled: true
+  # Only use when VPS is unavailable
+  fallbackMode: true
+  timeout: 60000
+  keepAlive: true
+  maxConcurrent: 2
+  maxMemoryGB: 8
+
+# Model Pulling
+pulling:
+  autoPull: true
+  # Verify models on startup
+  verifyOnStart: true
+  # Models to pre-pull
+  models:
+    - "nomic-embed-text"
+    - "llama3.2"
+    - "mistral-nemo"
+  # Pull timeout
+  pullTimeout: 300000  # 5 minutes
+
+# Embedding Generation
+embedding:
+  # Batch processing
+  batchSize: 32
+  # Overlap for long texts
+  chunkOverlap: 100
+  # Normalization
+  normalize: true
+  # Cache embeddings
+  cache:
+    enabled: true
+    maxSize: 10000
+    ttl: 86400  # 24 hours
+
+# Summarization Settings
+summarization:
+  # Prompt template
+  promptTemplate: |
+    You are a knowledge base summarizer. Your task is to synthesize information from multiple sources
+    into a clear, accurate summary with proper citations.
+
+    Context:
+    {context}
+
+    Query: {query}
+
+    Instructions:
+    1. Provide a comprehensive answer to the query
+    2. Use ONLY the provided context
+    3. Include citations for each source used
+    4. Format citations as [Source: file-path]
+    5. If context is insufficient, state clearly what information is missing
+
+    Summary:
+
+  # Temperature for deterministic results
+  temperature: 0.3
+  # Top-p (nucleus sampling)
+  topP: 0.9
+  # Max output tokens
+  maxTokens: 4096
+  # Stop sequences
+  stopSequences:
+    - "\n\n\n"
+    - "[DONE]"
+
+# Health Monitoring
+health:
+  # Check interval
+  checkInterval: 30  # seconds
+  # Timeout for health check
+  timeout: 5000
+  # Unhealthy threshold
+  unhealthyThreshold: 3
+  # Health endpoint
+  endpoint: "/api/tags"
+  # Fallback on unhealthy
+  fallbackOnUnhealthy: true
+
+# Performance Tuning
+performance:
+  # Connection pooling
+  connectionPool:
+    enabled: true
+    maxConnections: 10
+    minConnections: 2
+  # Request queuing
+  requestQueue:
+    enabled: true
+    maxSize: 100
+    timeout: 60000
+  # Response streaming
+  streaming:
+    enabled: false  # Not used for embeddings/summarization

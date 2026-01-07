@@ -1,0 +1,547 @@
+# Engineering Support System - Integration Plan
+## Knowledge-Base + Veracity-Engine Unified Architecture
+
+> **Status**: Planning Phase | **Date**: 2026-01-07 | **Version**: 1.0
+
+---
+
+## Executive Summary
+
+This document outlines the comprehensive integration of two powerful systems:
+
+1. **knowledge-base**: Qdrant-based vector storage with Ollama SLMs for semantic search and document retrieval
+2. **veracity-engine**: Neo4j-based code graph with deterministic validation and architectural context
+
+**Goal**: Create a unified Engineering Support System that leverages both vector similarity search (Qdrant) and graph relationships (Neo4j) with shared resources (Ollama models) for complete codebase intelligence.
+
+---
+
+## Vision, Objectives, Outcomes
+
+### Vision
+To create a **deterministic, evidence-based engineering intelligence system** that provides AI agents with:
+- **Complete codebase understanding** through hybrid vector + graph search
+- **Ground-truth validation** via veracity checking (staleness, orphans, contradictions)
+- **Unified infrastructure** with shared models and resources
+- **Multi-tenant capabilities** for supporting multiple projects simultaneously
+
+### Objectives
+1. **Integrate Qdrant + Neo4j** for hybrid search capabilities
+2. **Share Ollama models** between both systems efficiently
+3. **Unify MCP APIs** into a single gateway for AI agents
+4. **Create shared infrastructure** with Docker Compose
+5. **Implement codebase ingestion** for full triangulated truth
+6. **Maintain determinism** throughout all operations
+
+### Outcomes
+- Single entry point for AI agents to query codebase intelligence
+- Redundant storage (vector + graph) for reliability {#my-question: "why do you consider this redundant storage, while it can also be complementary given capabilities of qdrant for vector storage and similarity search, and Neo4j which can store entire knowledge graph and maybe code snippets, document snippets, etc.?  Or maybe my understanding is wrong.  Could you research and tell me if these dbs are tryly redundant and if so, considering both use cases, is there an opportunity to eliminate this ... rather duplication in my mind because redundancy could be 2 containers with 2 different neo4j dbs constantly syncing between each other, not 2 different dbs unless they compliment capabilities with each other, enhancing the capability together.}
+- Shared model resources for cost efficiency and performance {#my-question: "do we need a queing system both from system resources and performance perspective as well as LLM performance perspective ?"}
+- Modular architecture allowing independent enhancement of each component
+- Production-ready deployment on VPS with health checks and monitoring
+
+---
+
+## Current State Analysis
+
+### knowledge-base (Qdrant System)
+
+**Strengths**:
+- Production-ready Qdrant vector database (768-dim embeddings)
+- FallbackManager for multi-provider orchestration (Ollama VPS → Local → OpenAI)
+- MCP server for agent integration
+- VPS deployment with Docker Compose
+- TypeScript implementation with strict typing
+
+**Limitations**:
+- Relationships stored in payload (not true graph) {#my-question: "should we then use Neo4j and get rid of qdrant?"}
+- Relationship extraction not implemented
+- Caching layer incomplete
+- Limited to semantic search (no structural context)
+
+### veracity-engine (Neo4j System)
+
+**Strengths**:
+- True graph relationships (DEFINES, CALLS, DEPENDS_ON, etc.)
+- Veracity validation (STALE_DOCS, ORPHANED_NODES, contradictions)
+- Python AST parsing for code structure
+- MCP server for Claude Code integration
+- File watcher daemon for real-time updates
+- NeoDash visualization UI
+
+**Limitations**:  {#my-question: "can neo4j with typescript support removing these limitations?"}
+- Only indexes .py and .md files
+- Python AST parsing only (no TypeScript, Go, etc.)
+- No vector similarity search initially
+- Alpha status (~15% production-ready)
+- Hardcoded credentials in docker-compose
+
+---
+
+## Integration Architecture
+
+### System Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        AI Agent / Claude Code                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Unified MCP Gateway                                                         │
+│  ├─ query_knowledge_base()   # Semantic search via Qdrant                  │
+│  ├─ query_code_graph()       # Graph traversal via Neo4j                   │
+│  ├─ hybrid_search()          # Combined vector + graph                     │
+│  └─ validate_veracity()      # Ground-truth checking                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ▼               ▼               ▼
+        ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+        │ knowledge-base│  │veracity-engine│  │ Shared        │
+        │   (Qdrant)    │  │   (Neo4j)     │  │ Resources     │
+        ├───────────────┤  ├───────────────┤  ├───────────────┤
+        │ Vector Search │  │ Graph Traversal│  │ Ollama SLMs   │
+        │ MCP Server    │  │ MCP Server     │  │ ├─ nomic-embed│
+        │ Ingestion     │  │ Watcher Daemon │  │ ├─ llama3.2   │
+        │ FallbackMgr   │  │ Veracity Check │  │ ├─ mistral    │
+        └───────────────┘  └───────────────┘  │ └─ codeqwen   │
+                                     │          └───────────────┘
+                                     └──────────────┬────────────┘
+                                                    │
+                           ┌────────────────────────┼────────────────────────┐
+                           ▼                        ▼                        ▼
+                ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+                │  Qdrant (6333)   │    │  Neo4j (7474/    │    │  Shared          │
+                │  Vector DB       │    │   7687)          │    │  Infrastructure  │
+                ├──────────────────┤    ├──────────────────┤    ├──────────────────┤
+                │ 768-dim vectors  │    │ Graph Nodes/Edges│    │ Docker Compose   │
+                │ Cosine distance  │    │ Vector index     │    │ Health checks    │
+                │ UUID v4 IDs      │    │ Project labels   │    │ Monitoring       │
+                └──────────────────┘    └──────────────────┘    └──────────────────┘
+```
+
+### Data Flow
+
+**Ingestion Flow**:
+```
+Codebase → AST Parser → Structure Extract →
+├─→ Neo4j (relationships, dependencies)
+└─→ Qdrant (embeddings, chunks)
+```
+
+**Query Flow**:
+```
+Agent Query → Unified Gateway →
+├─→ Qdrant (semantic similarity)
+├─→ Neo4j (graph traversal)
+└─→ Merge & Rank → Veracity Check → Response
+```
+
+---
+
+## Detailed Implementation Plan
+
+### Phase 1: Infrastructure Setup (Week 1)
+
+#### 1.1 Shared Docker Compose Stack
+**File**: `engg-support-system/infra/docker-compose.yml`
+
+**Components**:
+- **qdrant**: Vector database (port 6333/6334)
+- **neo4j**: Graph database (port 7474/7687)
+- **neodash**: Graph visualization (port 5005)
+- **ollama**: Shared SLM service (port 11434)
+  - Pre-loaded models: nomic-embed-text, llama3.2, mistral-nemo, codeqwen
+- **redis**: Shared caching layer (port 6379)
+- **prometheus**: Metrics collection (port 9090)
+- **grafana**: Monitoring dashboard (port 3000)
+
+**Todo**:
+- [ ] Create unified docker-compose.yml
+- [ ] Add environment variable template (.env.example)
+- [ ] Configure health checks for all services
+- [ ] Set up volume persistence for data
+- [ ] Create startup order dependencies
+
+#### 1.2 Ollama Model Management
+**File**: `engg-support-system/infra/ollama_models.txt`
+
+**Pre-loaded Models**:
+```
+nomic-embed-text:latest   # Embeddings (768-dim)
+llama3.2:3b               # Fast reasoning
+llama3.2:latest           # General purpose
+mistral-nemo:latest       # Code understanding
+codeqwen:latest           # Code-specific
+deepseek-coder:latest     # Advanced code analysis
+```
+
+**Todo**:
+- [ ] Create model pull script
+- [ ] Add model health check endpoint
+- [ ] Document model capabilities per use case
+- [ ] Set up model fallback chain
+
+---
+
+### Phase 2: Unified MCP Gateway (Week 2)
+
+#### 2.1 Gateway Service
+**File**: `engg-support-system/gateway/src/server.ts`
+
+**Features**:
+- Route requests to appropriate backend (Qdrant vs Neo4j)
+- Implement hybrid search (merge + rank)
+- Unified authentication
+- Rate limiting per project
+- Request/response logging
+
+**API Endpoints**:
+```
+POST /query/vector         # Qdrant semantic search
+POST /query/graph          # Neo4j graph traversal
+POST /query/hybrid         # Combined search
+POST /query/veracity       # Ground-truth validation
+POST /ingest/codebase      # Full codebase ingestion
+GET  /health               # System health check
+GET  /stats                # Usage statistics
+```
+
+**Todo**:
+- [ ] Design unified MCP protocol
+- [ ] Implement request router
+- [ ] Add hybrid search algorithm
+- [ ] Create unified authentication
+- [ ] Add request/response logging
+- [ ] Implement rate limiting
+- [ ] Add circuit breakers for backends
+
+#### 2.2 Client SDK
+**File**: `engg-support-system/gateway/sdk/client.ts`
+
+**Features**:
+- Type-safe client for TypeScript/Python
+- Auto-retry with exponential backoff
+- Streaming response support
+- Connection pooling
+
+**Todo**:
+- [ ] Create TypeScript SDK
+- [ ] Create Python SDK
+- [ ] Add streaming support
+- [ ] Document usage examples
+- [ ] Add integration tests
+
+---
+
+### Phase 3: Enhanced knowledge-base (Week 3)
+
+#### 3.1 Relationship Extraction
+**File**: `engg-support-system/knowledge-base/src/core/RelationshipExtractor.ts`
+
+**Features**:
+- Extract code relationships (imports, calls, inherits)
+- Link documentation to code
+- Cross-reference commits and issues
+
+**Todo**:
+- [ ] Implement AST-based relationship extraction
+- [ ] Add support for TypeScript, Python, Go, Rust
+- [ ] Create relationship confidence scoring
+- [ ] Add relationship validation
+- [ ] Document relationship types
+
+#### 3.2 Complete Caching Layer
+**File**: `engg-support-system/knowledge-base/src/core/CacheManager.ts`
+
+**Features**:
+- Redis-backed distributed cache
+- Temperature-based cache promotion
+- TTL management
+- Cache invalidation on updates
+
+**Todo**:
+- [ ] Implement Redis cache client
+- [ ] Add cache warming strategies
+- [ ] Implement cache invalidation
+- [ ] Add cache metrics
+- [ ] Document cache policies
+
+---
+
+### Phase 4: Enhanced veracity-engine (Week 4)
+
+#### 4.1 Multi-Language Support
+**File**: `engg-support-system/veracity-engine/core/parsers/`
+
+**Features**:
+- TypeScript AST parser
+- Go AST parser
+- Rust AST parser
+- Generic parser interface
+
+**Todo**:
+- [ ] Create TypeScript parser
+- [ ] Create Go parser
+- [ ] Create Rust parser
+- [ ] Unify parser interface
+- [ ] Add parser tests
+- [ ] Document parser capabilities
+
+#### 4.2 Enhanced Veracity Checking
+**File**: `engg-support-system/veracity-engine/core/veracity.py`
+
+**Features**:
+- Cross-reference Qdrant for staleness detection
+- Detect orphaned nodes across both stores
+- Find contradictions between vector and graph
+- Add confidence scoring
+
+**Todo**:
+- [ ] Implement cross-store staleness check
+- [ ] Add orphan detection across stores
+- [ ] Create contradiction detection
+- [ ] Add confidence scoring
+- [ ] Document veracity rules
+
+---
+
+### Phase 5: Full Codebase Ingestion (Week 5)
+
+#### 5.1 Universal Ingestion Pipeline
+**File**: `engg-support-system/ingestion/src/ingester.ts`
+
+**Features**:
+- Detect all supported file types
+- Route to appropriate parser
+- Parallel ingestion
+- Progress tracking
+- Incremental updates
+
+**Supported File Types**:
+- Code: .ts, .tsx, .js, .jsx, .py, .go, .rs
+- Docs: .md, .txt, .rst
+- Config: .json, .yaml, .yml, .toml
+- Tests: .test.ts, .spec.ts, _test.go
+
+**Todo**:
+- [ ] Create file type detector
+- [ ] Implement parallel ingestion
+- [ ] Add progress tracking
+- [ ] Implement incremental updates
+- [ ] Add ingestion tests
+- [ ] Document ingestion process
+
+#### 5.2 Ingestion CLI
+**File**: `engg-support-system/ingestion/src/cli.ts`
+
+**Commands**:
+```bash
+engg-ingest init <project> <path>      # Initialize project
+engg-ingest scan                         # Scan for changes
+engg-ingest full                          # Full ingestion
+engg-ingest incremental                   # Incremental update
+engg-ingest status                        # Show ingestion status
+```
+
+**Todo**:
+- [ ] Create CLI interface
+- [ ] Add project management
+- [ ] Implement watch mode
+- [ ] Add status reporting
+- [ ] Document CLI usage
+
+---
+
+### Phase 6: Testing & Validation (Week 6)
+
+#### 6.1 Integration Tests
+**File**: `engg-support-system/tests/integration/`
+
+**Test Scenarios**:
+- Full ingestion cycle
+- Hybrid query accuracy
+- Veracity validation
+- Fallback behavior
+- Concurrent access
+
+**Todo**:
+- [ ] Create ingestion test suite
+- [ ] Create query test suite
+- [ ] Create veracity test suite
+- [ ] Create performance tests
+- [ ] Document test coverage
+
+#### 6.2 Performance Benchmarking
+**File**: `engg-support-system/tests/benchmarks/`
+
+**Metrics**:
+- Ingestion throughput (files/sec)
+- Query latency (p50, p95, p99)
+- Storage efficiency
+- Memory usage
+- Cache hit rates
+
+**Todo**:
+- [ ] Create ingestion benchmarks
+- [ ] Create query benchmarks
+- [ ] Create memory profiling
+- [ ] Document performance targets
+- [ ] Set up CI benchmarking
+
+---
+
+### Phase 7: Production Deployment (Week 7)
+
+#### 7.1 VPS Deployment
+**File**: `engg-support-system/deploy/`
+
+**Components**:
+- Deployment scripts
+- Configuration management
+- Health monitoring
+- Backup procedures
+- Disaster recovery
+
+**Todo**:
+- [ ] Create deployment scripts
+- [ ] Set up monitoring
+- [ ] Configure backups
+- [ ] Document deployment process
+- [ ] Create runbook for incidents
+
+#### 7.2 Documentation
+**File**: `engg-support-system/docs/`
+
+**Documents**:
+- Architecture overview
+- API reference
+- User guide
+- Operator guide
+- Troubleshooting
+
+**Todo**:
+- [ ] Write architecture docs
+- [ ] Write API reference
+- [ ] Write user guides
+- [ ] Write operator guide
+- [ ] Create troubleshooting guide
+
+---
+
+## Shared Resources Configuration
+
+### Environment Variables
+**File**: `engg-support-system/.env.example`
+
+```bash
+# Infrastructure
+QDRANT_URL=http://localhost:6333
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=changeme
+REDIS_URL=redis://localhost:6379
+OLLAMA_URL=http://localhost:11434
+
+# Gateway
+GATEWAY_PORT=4000
+GATEWAY_API_KEY=changeme
+GATEWAY_LOG_LEVEL=info
+
+# Knowledge Base
+KB_EMBED_MODEL=nomic-embed-text
+KB_SUMMARIZE_MODEL=llama3.2
+KB_FALLBACK_ENABLED=true
+
+# Veracity Engine
+VE_EMBED_MODEL=nomic-embed-text
+VE_VERACITY_THRESHOLD=0.7
+VE_STALE_DAYS=90
+
+# Monitoring
+PROMETHEUS_PORT=9090
+GRAFANA_PORT=3000
+METRICS_ENABLED=true
+```
+
+### Model Assignment Matrix
+
+| Use Case | Primary Model | Fallback | Rationale |
+|----------|--------------|----------|-----------|
+| Embeddings | nomic-embed-text | - | 768-dim, fast |
+| Summarization | llama3.2:3b | mistral-nemo | Low latency first |
+| Code Analysis | codeqwen | deepseek-coder | Code-specialized |
+| Reasoning | llama3.2 | mistral-nemo | General purpose |
+| Veracity Check | mistral-nemo | llama3.2 | Higher accuracy |
+
+---
+
+## Risk Mitigation
+
+### Technical Risks
+
+| Risk | Impact | Probability | Mitigation |
+|------|--------|-------------|------------|
+| Ollama model conflicts | High | Medium | Separate model containers |
+| Neo4j memory limits | High | Low | Configure heap size |
+| Qdrant downtime | High | Low | Health checks + alerts |
+| Integration bugs | Medium | High | Comprehensive tests |
+| Performance degradation | Medium | Medium | Benchmarking + tuning |
+
+### Operational Risks
+
+| Risk | Impact | Probability | Mitigation |
+|------|--------|-------------|------------|
+| VPS resource exhaustion | High | Medium | Resource limits + monitoring |
+| Data loss | Critical | Low | Regular backups |
+| Security breach | High | Low | API keys + rate limits |
+| Dependency conflicts | Medium | Medium | Pin versions |
+
+---
+
+## Success Criteria
+
+### Functional Requirements
+- [ ] Hybrid search returns results from both Qdrant and Neo4j
+- [ ] Veracity checking validates across both stores
+- [ ] Codebase ingestion supports 5+ languages
+- [ ] MCP gateway serves both systems unified
+- [ ] All tests pass with 80%+ coverage
+
+### Performance Requirements
+- [ ] Query latency < 500ms (p95)
+- [ ] Ingestion throughput > 100 files/sec
+- [ ] Cache hit rate > 60%
+- [ ] Uptime > 99.5%
+
+### Operational Requirements
+- [ ] Health checks for all services
+- [ ] Automated backups
+- [ ] Monitoring dashboards
+- [ ] Runbook for incidents
+
+---
+
+## Timeline Summary
+
+| Week | Focus | Deliverables |
+|------|-------|--------------|
+| 1 | Infrastructure | Docker Compose, Ollama models |
+| 2 | Gateway | Unified MCP server, SDK |
+| 3 | knowledge-base | Relationship extraction, caching |
+| 4 | veracity-engine | Multi-language, enhanced veracity |
+| 5 | Ingestion | Universal pipeline, CLI |
+| 6 | Testing | Integration tests, benchmarks |
+| 7 | Deployment | VPS setup, documentation |
+
+---
+
+## Next Steps
+
+1. **Review this plan** and approve architecture
+2. **Set up infrastructure** (Phase 1)
+3. **Create unified CLAUDE.md** with context from both systems
+4. **Begin Phase 1 implementation**
+
+---
+
+**Document Status**: Draft | **Last Updated**: 2026-01-07

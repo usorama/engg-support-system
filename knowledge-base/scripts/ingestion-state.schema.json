@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ingestion State Schema",
+  "description": "Schema for tracking Claude Code docs ingestion state",
+  "type": "object",
+  "required": ["version", "lastIngestion", "docs"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "State format version"
+    },
+    "lastIngestion": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Last successful full ingestion timestamp"
+    },
+    "lastModifiedCheck": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Last time we checked for remote modifications"
+    },
+    "docs": {
+      "type": "object",
+      "description": "State of each processed document",
+      "patternProperties": {
+        "^[a-z0-9-]+$": {
+          "type": "object",
+          "required": ["url", "lastProcessed", "hash", "status"],
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Full URL to the document"
+            },
+            "lastProcessed": {
+              "type": ["string", "null"],
+              "format": "date-time",
+              "description": "When this doc was last successfully ingested"
+            },
+            "hash": {
+              "type": ["string", "null"],
+              "description": "Content hash for change detection (SHA-256)"
+            },
+            "status": {
+              "type": "string",
+              "enum": ["pending", "processing", "success", "error"],
+              "description": "Current processing status"
+            },
+            "errorCount": {
+              "type": "integer",
+              "default": 0,
+              "description": "Number of consecutive processing failures"
+            },
+            "lastError": {
+              "type": ["string", "null"],
+              "description": "Last error message if status is 'error'"
+            },
+            "remoteLastModified": {
+              "type": ["string", "null"],
+              "format": "date-time",
+              "description": "Last-Modified header from remote server"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,93 @@
+# Veracity Engine Configuration Example
+# Copy this file to config/veracity.yaml and customize for your deployment
+#
+# Configuration Hierarchy (highest to lowest priority):
+# 1. CLI arguments (--neo4j-uri, etc.)
+# 2. Environment variables (VERACITY_NEO4J__URI, etc.)
+# 3. This config file
+# 4. Default values (built into the application)
+#
+# Environment variable naming:
+#   - Prefix: VERACITY_
+#   - Nested delimiter: __ (double underscore)
+#   - Example: VERACITY_NEO4J__URI=bolt://localhost:7687
+
+# Neo4j Database Configuration
+neo4j:
+  # Connection URI for Neo4j database
+  # Format: bolt://hostname:port or neo4j://hostname:port
+  uri: "bolt://localhost:7687"
+
+  # Neo4j username (default: neo4j)
+  user: "neo4j"
+
+  # Neo4j password
+  # SECURITY: For production, use environment variable VERACITY_NEO4J__PASSWORD
+  # or NEO4J_PASSWORD instead of storing in this file
+  password: "password"
+
+  # Connection pool size (default: 50)
+  pool_size: 50
+
+# Embedding Model Configuration
+embedding:
+  # Ollama embedding model name
+  # Recommended: nomic-embed-text for code embeddings
+  model: "nomic-embed-text"
+
+  # Model version for reproducibility (optional)
+  # Set this to pin a specific version: v1.5.0
+  version: null
+
+  # Batch size for embedding generation (default: 32)
+  batch_size: 32
+
+  # Prefix for document embeddings (indexing)
+  document_prefix: "search_document:"
+
+  # Prefix for query embeddings (searching)
+  query_prefix: "search_query:"
+
+# LLM (Large Language Model) Configuration
+llm:
+  # Ollama LLM model name for synthesis
+  model: "llama3.2"
+
+  # Model version for reproducibility (optional)
+  version: null
+
+  # Random seed for deterministic output (default: 42)
+  seed: 42
+
+  # Temperature for response generation (0.0 = deterministic)
+  temperature: 0.0
+
+  # Repeat penalty for generation (default: 1.1)
+  repeat_penalty: 1.1
+
+# Logging Configuration
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+
+  # Log message format
+  format: "%(asctime)s - %(levelname)s - %(message)s"
+
+# Project Configuration (optional, can be overridden via CLI)
+project:
+  # Project name for multitenancy (optional)
+  name: null
+
+  # Project root directory (optional, defaults to current directory)
+  root_dir: null
+
+  # Directories to scan for indexing
+  target_dirs:
+    - "services"
+    - "models"
+    - "scripts"
+    - "docs"
+    - "core"
+    - "api"
+    - "lib"
+    - "src"
