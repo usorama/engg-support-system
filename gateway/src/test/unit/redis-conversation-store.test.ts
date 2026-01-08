@@ -71,7 +71,7 @@ describe("RedisConversationStore", () => {
       await store.save(state);
 
       // Verify saved - Redis should not throw
-      expect(async () => await store.save(state)).resolves.not.toThrow();
+      await expect(store.save(state)).resolves.not.toThrow();
     });
 
     it("should load conversation state from Redis", async () => {

@@ -24,10 +24,11 @@ export class RedisConversationStore {
   private keyPrefix = "conversation:";
   private ttlSeconds = 3600; // 1 hour
   private redisAvailable = false;
+  private initPromise: Promise<void>;
 
   constructor() {
-    // Start Redis connection in background
-    this.initializeRedis().catch(() => {
+    // Start Redis connection and store promise
+    this.initPromise = this.initializeRedis().catch(() => {
       // Errors handled in initializeRedis
     });
   }
@@ -85,8 +86,12 @@ export class RedisConversationStore {
 
   /**
    * Check if Redis is available
+   * Waits for initialization to complete first
    */
   private async checkRedisAvailable(): Promise<boolean> {
+    // Wait for initialization to complete
+    await this.initPromise;
+
     if (!this.redis || this.redisAvailable === false) {
       return false;
     }
@@ -130,7 +135,7 @@ export class RedisConversationStore {
    */
   async load(
     conversationId: string,
-  ): Promise<ConversationState | undefined> {
+  ): Promise<ConversationState | null> {
     const isAvailable = await this.checkRedisAvailable();
 
     if (isAvailable && this.redis) {
@@ -139,13 +144,13 @@ export class RedisConversationStore {
         const data = await this.redis.get(key);
 
         if (!data) {
-          return undefined;
+          return null;
         }
 
         try {
           return JSON.parse(data) as ConversationState;
         } catch {
-          return undefined;
+          return null;
         }
       } catch (err) {
         console.warn(
@@ -156,8 +161,8 @@ export class RedisConversationStore {
       }
     }
 
-    // Fallback to in-memory
-    return this.fallback.get(conversationId);
+    // Fallback to in-memory - return null if not found
+    return this.fallback.get(conversationId) ?? null;
   }
 
   /**

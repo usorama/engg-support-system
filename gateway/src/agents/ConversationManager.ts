@@ -106,7 +106,8 @@ export class ConversationManager {
     conversationId: string,
   ): Promise<ConversationState | undefined> {
     // Try local cache first
-    let state = this.localCache.get(conversationId);
+    let state: ConversationState | undefined | null =
+      this.localCache.get(conversationId);
 
     // Fallback to Redis if not in cache
     if (!state) {
@@ -140,7 +141,8 @@ export class ConversationManager {
     value: unknown,
   ): Promise<void> {
     // Try local cache first
-    let state = this.localCache.get(conversationId);
+    let state: ConversationState | undefined | null =
+      this.localCache.get(conversationId);
 
     // Fallback to Redis if not in cache
     if (!state) {
@@ -163,7 +165,8 @@ export class ConversationManager {
     conversationId: string,
   ): Promise<ConversationState | undefined> {
     // Try local cache first
-    let state = this.localCache.get(conversationId);
+    let state: ConversationState | undefined | null =
+      this.localCache.get(conversationId);
 
     // Fallback to Redis if not in cache
     if (!state) {

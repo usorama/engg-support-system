@@ -257,9 +257,11 @@ describe("Redis Persistence (E2E)", () => {
         manager2.addContext(state.conversationId, "manager", "2"),
       ]);
 
-      // Last write should win
-      const final = await manager1.getConversation(state.conversationId);
+      // Last write should win - create new manager to bypass local cache
+      const manager3 = new ConversationManager();
+      const final = await manager3.getConversation(state.conversationId);
       expect(final?.collectedContext.manager).toBe("2");
+      await manager3.close();
 
       // Cleanup
       await manager1.endConversation(state.conversationId);
