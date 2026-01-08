@@ -8,6 +8,10 @@ export * from "./types/agent-contracts.js";
 
 // Agents
 export * from "./agents/EnggContextAgent.js";
+export * from "./agents/ConversationManager.js";
+
+// Storage
+export * from "./storage/RedisConversationStore.js";
 
 // Utilities
 export * from "./utils/qdrant-client.js";

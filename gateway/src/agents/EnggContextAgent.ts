@@ -381,7 +381,7 @@ export class EnggContextAgent {
   ): Promise<ConversationResponse> {
     // Start or continue conversation
     const conversationState =
-      conversationManager.startConversation(request.query);
+      await conversationManager.startConversation(request.query);
 
     // Generate clarification questions
     const clarificationQuestions = generateClarifications(
@@ -421,7 +421,7 @@ export class EnggContextAgent {
   ): Promise<GatewayResponse> {
     // Get conversation state
     const conversationState =
-      conversationManager.getConversation(request.conversationId);
+      await conversationManager.getConversation(request.conversationId);
 
     if (conversationState === undefined) {
       // Invalid conversation ID - return error response
@@ -449,7 +449,7 @@ export class EnggContextAgent {
 
     // Collect context from answers
     for (const [key, value] of Object.entries(request.answers)) {
-      conversationManager.addContext(
+      await conversationManager.addContext(
         request.conversationId,
         key,
         value,
@@ -459,7 +459,7 @@ export class EnggContextAgent {
     // Check if max rounds reached
     if (conversationState.round >= conversationState.maxRounds) {
       // End conversation and execute query
-      conversationManager.endConversation(request.conversationId);
+      await conversationManager.endConversation(request.conversationId);
       return this.executeQueryWithCollectedContext(
         request,
         conversationState,
@@ -467,11 +467,11 @@ export class EnggContextAgent {
     }
 
     // Advance to next round
-    const updatedState = conversationManager.advanceRound(
+    const updatedState = await conversationManager.advanceRound(
       request.conversationId,
     );
 
-    if (updatedState === null) {
+    if (updatedState === undefined) {
       // Conversation not found - return error
       return {
         requestId: request.requestId,

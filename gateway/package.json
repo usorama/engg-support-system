@@ -27,6 +27,7 @@
   "license": "MIT",
   "dependencies": {
     "@qdrant/js-client-rest": "^1.12.0",
+    "ioredis": "^5.9.1",
     "neo4j-driver": "^5.20.0",
     "zod": "^3.22.0"
   },
