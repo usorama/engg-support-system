@@ -15,9 +15,16 @@ import type {
   QueryStatus,
   SemanticResult,
   StructuralResult,
+  QueryRequestWithMode,
+  GatewayResponse,
+  ConversationResponse,
+  ConversationRequest,
 } from "../types/agent-contracts.js";
 import { QdrantGatewayClient, type QdrantClientConfig } from "../utils/qdrant-client.js";
 import { Neo4jGatewayClient } from "../utils/neo4j-client.js";
+import { classifyQuery, type QueryClassification } from "./QueryClassifier.js";
+import { generateClarifications } from "./ClarificationGenerator.js";
+import { conversationManager } from "./ConversationManager.js";
 
 export interface EnggContextAgentConfig {
   qdrant: {
@@ -72,12 +79,27 @@ export class EnggContextAgent {
 
   /**
    * Process a query request - ALWAYS queries both databases
+   * Returns GatewayResponse (QueryResponse | ConversationResponse)
    */
-  async query(request: QueryRequest): Promise<QueryResponse> {
+  async query(request: QueryRequestWithMode): Promise<GatewayResponse> {
     const startTime = Date.now();
 
-    // Classify query intent
-    const queryType = this.classifyQuery(request.query);
+    // Classify query to detect ambiguity and determine mode
+    const classification = classifyQuery(request.query);
+
+    // Check if conversational mode is requested or auto-detected
+    const shouldUseConversationalMode =
+      request.mode === "conversational" ||
+      (request.mode === undefined &&
+        classification.suggestedMode === "conversational");
+
+    // Branch to conversational mode if needed
+    if (shouldUseConversationalMode) {
+      return this.queryWithConversation(request, classification);
+    }
+
+    // One-shot mode: proceed with normal query flow
+    const queryType = classification.intent;
 
     // Generate embedding for query (if Ollama available)
     const queryVector = this.ollamaUrl
@@ -347,5 +369,210 @@ export class EnggContextAgent {
    */
   async close(): Promise<void> {
     await this.neo4jClient.close();
+  }
+
+  /**
+   * Handle conversational mode query
+   * Returns clarification questions or executes query after context collection
+   */
+  private async queryWithConversation(
+    request: QueryRequestWithMode,
+    classification: QueryClassification,
+  ): Promise<ConversationResponse> {
+    // Start or continue conversation
+    const conversationState =
+      conversationManager.startConversation(request.query);
+
+    // Generate clarification questions
+    const clarificationQuestions = generateClarifications(
+      request.query,
+      classification,
+    );
+
+    // Build conversation response
+    return {
+      type: "conversation",
+      conversationId: conversationState.conversationId,
+      round: conversationState.round,
+      maxRounds: conversationState.maxRounds,
+      phase: conversationState.phase,
+      clarifications: {
+        questions: clarificationQuestions,
+        message:
+          classification.clarity === "requires_context"
+            ? "I need more information to help you effectively."
+            : "I'd like to clarify a few things to give you better results.",
+      },
+      meta: {
+        originalQuery: request.query,
+        detectedIntent: classification.intent,
+        confidence: classification.confidence,
+        collectedContext: conversationState.collectedContext,
+      },
+    };
+  }
+
+  /**
+   * Continue conversation with user's answers
+   * Returns QueryResponse with results or another ConversationResponse
+   */
+  async continueConversation(
+    request: ConversationRequest,
+  ): Promise<GatewayResponse> {
+    // Get conversation state
+    const conversationState =
+      conversationManager.getConversation(request.conversationId);
+
+    if (conversationState === undefined) {
+      // Invalid conversation ID - return error response
+      return {
+        requestId: request.requestId,
+        status: "unavailable",
+        timestamp: new Date().toISOString(),
+        queryType: "unknown",
+        results: {
+          semantic: { summary: "Invalid conversation ID", matches: [] },
+          structural: { summary: "Invalid conversation ID", relationships: [] },
+        },
+        warnings: ["Invalid conversation ID provided"],
+        fallbackMessage: "Please start a new conversation",
+        meta: {
+          qdrantQueried: false,
+          neo4jQueried: false,
+          qdrantLatency: 0,
+          neo4jLatency: 0,
+          totalLatency: 0,
+          cacheHit: false,
+        },
+      };
+    }
+
+    // Collect context from answers
+    for (const [key, value] of Object.entries(request.answers)) {
+      conversationManager.addContext(
+        request.conversationId,
+        key,
+        value,
+      );
+    }
+
+    // Check if max rounds reached
+    if (conversationState.round >= conversationState.maxRounds) {
+      // End conversation and execute query
+      conversationManager.endConversation(request.conversationId);
+      return this.executeQueryWithCollectedContext(
+        request,
+        conversationState,
+      );
+    }
+
+    // Advance to next round
+    const updatedState = conversationManager.advanceRound(
+      request.conversationId,
+    );
+
+    if (updatedState === null) {
+      // Conversation not found - return error
+      return {
+        requestId: request.requestId,
+        status: "unavailable",
+        timestamp: new Date().toISOString(),
+        queryType: "unknown",
+        results: {
+          semantic: { summary: "Conversation not found", matches: [] },
+          structural: { summary: "Conversation not found", relationships: [] },
+        },
+        warnings: ["Conversation not found"],
+        fallbackMessage: "Please start a new conversation",
+        meta: {
+          qdrantQueried: false,
+          neo4jQueried: false,
+          qdrantLatency: 0,
+          neo4jLatency: 0,
+          totalLatency: 0,
+          cacheHit: false,
+        },
+      };
+    }
+
+    if (updatedState.phase === "completed") {
+      // Max rounds reached, execute query
+      return this.executeQueryWithCollectedContext(
+        request,
+        conversationState,
+      );
+    }
+
+    // Still need more context - generate follow-up questions
+    const classification = classifyQuery(
+      conversationState.originalQuery,
+    );
+    const clarificationQuestions = generateClarifications(
+      conversationState.originalQuery,
+      classification,
+    );
+
+    return {
+      type: "conversation",
+      conversationId: updatedState.conversationId,
+      round: updatedState.round,
+      maxRounds: updatedState.maxRounds,
+      phase: updatedState.phase,
+      clarifications: {
+        questions: clarificationQuestions,
+        message: "Thank you. I have a few more questions to understand your needs.",
+      },
+      meta: {
+        originalQuery: updatedState.originalQuery,
+        detectedIntent: classification.intent,
+        confidence: classification.confidence,
+        collectedContext: updatedState.collectedContext,
+      },
+    };
+  }
+
+  /**
+   * Execute query with collected context from conversation
+   */
+  private async executeQueryWithCollectedContext(
+    request: ConversationRequest,
+    conversationState: { originalQuery: string; collectedContext: Record<string, unknown> },
+  ): Promise<QueryResponse> {
+    // Build enriched query with collected context
+    const enrichedQuery = this.buildEnrichedQuery(
+      conversationState.originalQuery,
+      conversationState.collectedContext,
+    );
+
+    // Execute query with enriched context
+    return this.query({
+      query: enrichedQuery,
+      requestId: request.requestId,
+      timestamp: request.timestamp,
+      context: Object.values(conversationState.collectedContext).map(String),
+    }) as Promise<QueryResponse>;
+  }
+
+  /**
+   * Build enriched query with collected context
+   */
+  private buildEnrichedQuery(
+    originalQuery: string,
+    collectedContext: Record<string, unknown>,
+  ): string {
+    const contextParts: string[] = [originalQuery];
+
+    // Add collected context to query
+    if (collectedContext.aspect !== undefined) {
+      contextParts.push(`Focus: ${collectedContext.aspect}`);
+    }
+    if (collectedContext.scope !== undefined) {
+      contextParts.push(`Scope: ${collectedContext.scope}`);
+    }
+    if (collectedContext.context !== undefined) {
+      contextParts.push(`Goal: ${collectedContext.context}`);
+    }
+
+    return contextParts.join(". ");
   }
 }

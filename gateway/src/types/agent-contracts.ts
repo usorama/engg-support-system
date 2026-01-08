@@ -223,3 +223,111 @@ export interface QueryResponseWithFallback extends QueryResponseBase {
   /** Fallback message (if unavailable) */
   fallbackMessage: string;
 }
+
+// ============================================================================
+// CONVERSATION TYPES (Phase 0b)
+// ============================================================================
+
+/**
+ * Query mode (one-shot or conversational)
+ */
+export type QueryMode = "one-shot" | "conversational";
+
+/**
+ * Enhanced query request with optional mode
+ */
+export interface QueryRequestWithMode extends QueryRequest {
+  /** Query mode (optional - auto-detected if not specified) */
+  mode?: QueryMode;
+}
+
+/**
+ * Conversation clarification question
+ */
+export interface ClarificationQuestion {
+  /** Question ID */
+  id: string;
+
+  /** Question text */
+  question: string;
+
+  /** Available options */
+  options: string[];
+
+  /** Allow multiple selections */
+  multipleChoice: boolean;
+
+  /** Is this question required */
+  required: boolean;
+}
+
+/**
+ * Clarification response data
+ */
+export interface ClarificationData {
+  /** Questions to ask user */
+  questions: ClarificationQuestion[];
+
+  /** Message to user */
+  message: string;
+}
+
+/**
+ * Conversation request (continuation)
+ */
+export interface ConversationRequest {
+  /** Conversation ID */
+  conversationId: string;
+
+  /** User's answers to clarification questions */
+  answers: Record<string, string>;
+
+  /** Request ID */
+  requestId: string;
+
+  /** Timestamp */
+  timestamp: string;
+}
+
+/**
+ * Conversation response (when clarification needed)
+ */
+export interface ConversationResponse {
+  /** Response type discriminator */
+  type: "conversation";
+
+  /** Conversation ID */
+  conversationId: string;
+
+  /** Current round number */
+  round: number;
+
+  /** Maximum rounds allowed */
+  maxRounds: number;
+
+  /** Conversation phase */
+  phase: "analyzing" | "clarifying" | "executing" | "completed";
+
+  /** Clarification questions */
+  clarifications: ClarificationData;
+
+  /** Metadata */
+  meta: {
+    /** Original query */
+    originalQuery: string;
+
+    /** Detected intent */
+    detectedIntent: QueryIntent;
+
+    /** Confidence score */
+    confidence: number;
+
+    /** Collected context so far */
+    collectedContext?: Record<string, unknown>;
+  };
+}
+
+/**
+ * Unified response type (one-shot or conversation)
+ */
+export type GatewayResponse = QueryResponse | ConversationResponse;
