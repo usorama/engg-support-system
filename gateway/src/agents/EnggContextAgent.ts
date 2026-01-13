@@ -47,13 +47,13 @@ export interface EnggContextAgentConfig {
   };
   /** Optional separate synthesis configuration for using different LLM providers (e.g., zAI) */
   synthesis?: {
-    /** LLM provider: "ollama" | "anthropic" */
-    provider: "ollama" | "anthropic";
+    /** LLM provider: "ollama" | "anthropic" | "openai" */
+    provider: "ollama" | "anthropic" | "openai";
     /** API base URL */
     baseUrl: string;
-    /** API key (required for anthropic provider) */
+    /** API key (required for anthropic/openai provider) */
     apiKey?: string;
-    /** Model name (default: glm-4.7 for anthropic, llama3.2 for ollama) */
+    /** Model name (default: glm-4.7 for anthropic/openai, llama3.2 for ollama) */
     model?: string;
     /** Request timeout in ms */
     timeout?: number;

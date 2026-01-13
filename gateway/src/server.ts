@@ -47,13 +47,16 @@ const config: EnggContextAgentConfig = {
   },
 };
 
-// Configure synthesis provider (zAI via Anthropic-compatible API if configured)
+// Configure synthesis provider (zAI uses OpenAI-compatible API)
 const synthesisApiUrl = process.env.SYNTHESIS_API_URL || process.env.ANTHROPIC_BASE_URL;
 const synthesisApiKey = process.env.SYNTHESIS_API_KEY || process.env.ANTHROPIC_API_KEY;
+const synthesisProvider = process.env.SYNTHESIS_PROVIDER as "ollama" | "anthropic" | "openai" | undefined;
 
 if (synthesisApiUrl && synthesisApiKey) {
+  // Auto-detect provider: use "openai" for zAI URLs, otherwise use explicit provider or "anthropic"
+  const provider = synthesisProvider ?? (synthesisApiUrl.includes("api.z.ai") ? "openai" : "anthropic");
   config.synthesis = {
-    provider: "anthropic",
+    provider,
     baseUrl: synthesisApiUrl,
     apiKey: synthesisApiKey,
     model: process.env.SYNTHESIS_MODEL || process.env.ANTHROPIC_MODEL || "glm-4.7",

@@ -73,8 +73,11 @@ export interface SynthesisOptions {
 
 /**
  * LLM Provider type
+ * - ollama: Local Ollama instance
+ * - anthropic: Anthropic-compatible API (Claude, etc.)
+ * - openai: OpenAI-compatible API (zAI, OpenRouter, etc.)
  */
-export type LLMProvider = "ollama" | "anthropic";
+export type LLMProvider = "ollama" | "anthropic" | "openai";
 
 /**
  * SynthesisAgent configuration
@@ -82,11 +85,11 @@ export type LLMProvider = "ollama" | "anthropic";
 export interface SynthesisAgentConfig {
   /** LLM provider type (default: ollama) */
   provider?: LLMProvider;
-  /** API base URL (Ollama URL or Anthropic-compatible base URL) */
+  /** API base URL (Ollama URL, Anthropic URL, or OpenAI-compatible URL) */
   baseUrl: string;
-  /** Model name (default: llama3.2 for Ollama, glm-4.7 for Anthropic) */
+  /** Model name (default: llama3.2 for Ollama, glm-4.7 for Anthropic/OpenAI) */
   model?: string;
-  /** API key (required for Anthropic provider) */
+  /** API key (required for Anthropic and OpenAI providers) */
   apiKey?: string;
   /** Request timeout in ms (default: 30000) */
   timeout?: number;
@@ -127,7 +130,14 @@ export class SynthesisAgent {
     } else {
       this.provider = config.provider ?? "ollama";
       this.baseUrl = config.baseUrl.replace(/\/$/, "");
-      this.model = config.model ?? (this.provider === "anthropic" ? "glm-4.7" : "llama3.2");
+      // Set default model based on provider
+      if (config.model) {
+        this.model = config.model;
+      } else if (this.provider === "anthropic" || this.provider === "openai") {
+        this.model = "glm-4.7";
+      } else {
+        this.model = "llama3.2";
+      }
       this.timeout = config.timeout ?? 30000;
       // Only set apiKey if defined
       if (config.apiKey !== undefined) {
@@ -196,9 +206,30 @@ export class SynthesisAgent {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      if (this.provider === "anthropic") {
-        // For Anthropic-compatible APIs, just check if we have an API key
-        // and the endpoint is reachable
+      if (this.provider === "openai") {
+        // For OpenAI-compatible APIs (zAI, etc.), check if we have an API key
+        if (!this.apiKey) {
+          return false;
+        }
+        // Simple health check - try a minimal request
+        const response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: this.model,
+            max_tokens: 1,
+            messages: [{ role: "user", content: "test" }],
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        // 200 or 400 (invalid request) both indicate service is available
+        return response.ok || response.status === 400;
+      } else if (this.provider === "anthropic") {
+        // For Anthropic-compatible APIs, check if we have an API key
         if (!this.apiKey) {
           return false;
         }
@@ -330,7 +361,14 @@ Provide your answer with citations:`;
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      if (this.provider === "anthropic") {
+      if (this.provider === "openai") {
+        return await this.generateAnswerOpenAI(
+          systemPrompt,
+          userPrompt,
+          options,
+          controller.signal
+        );
+      } else if (this.provider === "anthropic") {
         return await this.generateAnswerAnthropic(
           systemPrompt,
           userPrompt,
@@ -400,7 +438,55 @@ Provide your answer with citations:`;
   }
 
   /**
-   * Generate answer using Anthropic-compatible API (zAI, OpenRouter, etc.)
+   * Generate answer using OpenAI-compatible API (zAI, OpenRouter, etc.)
+   */
+  private async generateAnswerOpenAI(
+    systemPrompt: string,
+    userPrompt: string,
+    options: SynthesisOptions | undefined,
+    signal: AbortSignal
+  ): Promise<string> {
+    if (!this.apiKey) {
+      throw new Error("API key required for OpenAI provider");
+    }
+
+    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: options?.maxTokens ?? 2048,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: options?.temperature ?? 0.3,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI API request failed: ${response.status} ${errorText}`);
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error("Invalid response from OpenAI API: missing message content");
+    }
+
+    return content.trim();
+  }
+
+  /**
+   * Generate answer using Anthropic-compatible API (Claude, etc.)
    */
   private async generateAnswerAnthropic(
     systemPrompt: string,
@@ -680,18 +766,20 @@ export function createLocalSynthesisAgent(
 
 /**
  * Create a SynthesisAgent for VPS deployment
- * Prefers zAI API if configured, falls back to Ollama
+ * Priority: zAI (openai) > Anthropic > Ollama
  */
 export function createVPSSynthesisAgent(): SynthesisAgent {
-  // Check for Anthropic-compatible API (zAI, etc.)
-  const anthropicBaseUrl = process.env.SYNTHESIS_API_URL || process.env.ANTHROPIC_BASE_URL;
-  const anthropicApiKey = process.env.SYNTHESIS_API_KEY || process.env.ANTHROPIC_API_KEY;
+  const synthesisProvider = process.env.SYNTHESIS_PROVIDER as LLMProvider | undefined;
+  const apiUrl = process.env.SYNTHESIS_API_URL || process.env.ANTHROPIC_BASE_URL;
+  const apiKey = process.env.SYNTHESIS_API_KEY || process.env.ANTHROPIC_API_KEY;
 
-  if (anthropicBaseUrl && anthropicApiKey) {
+  // If explicitly configured or we have zAI-style URL
+  if (apiUrl && apiKey) {
+    const provider = synthesisProvider ?? (apiUrl.includes("api.z.ai") ? "openai" : "anthropic");
     return new SynthesisAgent({
-      provider: "anthropic",
-      baseUrl: anthropicBaseUrl,
-      apiKey: anthropicApiKey,
+      provider,
+      baseUrl: apiUrl,
+      apiKey,
       model: process.env.SYNTHESIS_MODEL || process.env.ANTHROPIC_MODEL || "glm-4.7",
       timeout: 60000,
     });
@@ -708,20 +796,45 @@ export function createVPSSynthesisAgent(): SynthesisAgent {
 /**
  * Create a SynthesisAgent from environment variables
  *
- * Supports two configurations:
- * 1. Anthropic-compatible API (zAI, OpenRouter):
+ * Supports three configurations:
+ * 1. OpenAI-compatible API (zAI, OpenRouter, etc.):
+ *    - SYNTHESIS_PROVIDER=openai
+ *    - SYNTHESIS_API_URL (e.g., https://api.z.ai/api/paas/v4)
+ *    - SYNTHESIS_API_KEY
+ *    - SYNTHESIS_MODEL (default: glm-4.7)
+ *
+ * 2. Anthropic-compatible API (Claude, etc.):
  *    - SYNTHESIS_PROVIDER=anthropic
  *    - SYNTHESIS_API_URL or ANTHROPIC_BASE_URL
  *    - SYNTHESIS_API_KEY or ANTHROPIC_API_KEY
  *    - SYNTHESIS_MODEL or ANTHROPIC_MODEL (default: glm-4.7)
  *
- * 2. Ollama:
+ * 3. Ollama:
  *    - SYNTHESIS_PROVIDER=ollama (or unset)
  *    - OLLAMA_URL (required)
  *    - OLLAMA_MODEL (default: llama3.2)
  */
 export function createSynthesisAgentFromEnv(): SynthesisAgent {
   const provider = (process.env.SYNTHESIS_PROVIDER ?? "ollama") as LLMProvider;
+
+  if (provider === "openai") {
+    const baseUrl = process.env.SYNTHESIS_API_URL;
+    const apiKey = process.env.SYNTHESIS_API_KEY;
+
+    if (!baseUrl || !apiKey) {
+      throw new Error(
+        "SYNTHESIS_API_URL and SYNTHESIS_API_KEY are required for openai provider"
+      );
+    }
+
+    return new SynthesisAgent({
+      provider: "openai",
+      baseUrl,
+      apiKey,
+      model: process.env.SYNTHESIS_MODEL || "glm-4.7",
+      timeout: process.env.SYNTHESIS_TIMEOUT ? parseInt(process.env.SYNTHESIS_TIMEOUT, 10) : 60000,
+    });
+  }
 
   if (provider === "anthropic") {
     const baseUrl = process.env.SYNTHESIS_API_URL || process.env.ANTHROPIC_BASE_URL;
@@ -759,14 +872,15 @@ export function createSynthesisAgentFromEnv(): SynthesisAgent {
 
 /**
  * Create a SynthesisAgent with zAI API (GLM-4.7)
+ * Uses OpenAI-compatible endpoint at https://api.z.ai/api/paas/v4
  */
 export function createZAISynthesisAgent(
   apiKey: string,
   options?: { model?: string; timeout?: number }
 ): SynthesisAgent {
   return new SynthesisAgent({
-    provider: "anthropic",
-    baseUrl: "https://api.z.ai/api/anthropic",
+    provider: "openai",
+    baseUrl: "https://api.z.ai/api/paas/v4",
     apiKey,
     model: options?.model ?? "glm-4.7",
     timeout: options?.timeout ?? 60000,
