@@ -68,21 +68,26 @@ export class Neo4jGatewayClient {
       const session = this.driver.session({ database: this.database });
       try {
         // Search for nodes/relationships related to the query
+        // Schema aligned with veracity-engine build_graph.py:
+        // - path: file path (not "file")
+        // - uid: unique id (not "id")
+        // - start_line: line number (not "line")
+        // - qualified_name: full qualified name for code elements
         const cypher = `
           MATCH (source)-[r]->(target)
           WHERE (
             source.name CONTAINS $query
-            OR source.file CONTAINS $query
-            OR source.id CONTAINS $query
+            OR source.path CONTAINS $query
+            OR source.qualified_name CONTAINS $query
             OR type(r) CONTAINS $query
           )
           ${options.project ? `AND source.project = $project` : ""}
           RETURN source.name AS source,
                  target.name AS target,
                  type(r) AS type,
-                 source.file AS sourceFile,
-                 target.file AS targetFile,
-                 source.line AS sourceLine,
+                 source.path AS sourceFile,
+                 target.path AS targetFile,
+                 source.start_line AS sourceLine,
                  [source.name, type(r), target.name] AS path
           LIMIT $limit
         `;
