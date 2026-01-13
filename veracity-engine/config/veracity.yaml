@@ -1,0 +1,18 @@
+# Veracity Engine VPS Configuration
+
+neo4j:
+  uri: "bolt://localhost:7688"
+  user: "neo4j"
+  password: "testpassword"
+  pool_size: 10
+
+embedding:
+  model: "nomic-embed-text"
+  version: null
+  batch_size: 16
+  document_prefix: "search_document:"
+  query_prefix: "search_query:"
+
+ollama:
+  base_url: "http://localhost:11434"
+  timeout: 120

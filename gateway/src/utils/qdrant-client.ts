@@ -14,6 +14,19 @@ export interface QdrantClientConfig {
 }
 
 /**
+ * Qdrant payload from veracity-engine indexing
+ */
+interface VeracityPayload {
+  uid: string;
+  name: string;
+  qualified_name: string;
+  docstring: string;
+  path: string;
+  labels: string[];
+  project: string;
+}
+
+/**
  * Qdrant client for semantic search
  */
 export class QdrantGatewayClient {
@@ -31,7 +44,7 @@ export class QdrantGatewayClient {
       timeout: config.timeout || 30000,
     };
 
-    if (config.apiKey !== undefined) {
+    if (config.apiKey  !==  undefined) {
       clientConfig.apiKey = config.apiKey;
     }
 
@@ -71,12 +84,14 @@ export class QdrantGatewayClient {
         vector: number[];
         limit: number;
         score_threshold?: number;
+        with_payload: boolean;
       } = {
         vector: queryVector,
         limit: options.limit || 10,
+        with_payload: true,
       };
 
-      if (options.minScore !== undefined) {
+      if (options.minScore  !==  undefined) {
         searchParams.score_threshold = options.minScore;
       }
 
@@ -85,33 +100,23 @@ export class QdrantGatewayClient {
       const latency = Date.now() - startTime;
 
       const matches: SemanticMatch[] = searchResults.map((result) => {
-        const payload = result.payload as {
-          content: string;
-          source: string;
-          type: "code" | "doc" | "comment";
-          lineStart?: number;
-          lineEnd?: number;
-          language?: string;
-        };
+        const payload = result.payload as unknown as VeracityPayload;
 
+        // Map veracity-engine payload to SemanticMatch format
         const match: SemanticMatch = {
-          content: payload.content,
+          // Use docstring as content, or name if docstring is empty
+          content: payload.docstring || payload.name,
           score: result.score,
-          source: payload.source,
-          type: payload.type,
-        };
-
-        if (payload.lineStart !== undefined) {
-          match.lineStart = payload.lineStart;
-        }
-
-        if (payload.lineEnd !== undefined) {
-          match.lineEnd = payload.lineEnd;
-        }
-
-        if (payload.language !== undefined) {
-          match.language = payload.language;
-        }
+          // Use path as source
+          source: payload.path,
+          // Determine type from labels
+          type: this.determineContentType(payload.labels),
+          // Include additional metadata in content
+          name: payload.name,
+          path: payload.path,
+          docstring: payload.docstring,
+          qualified_name: payload.qualified_name,
+        } as SemanticMatch & { name?: string; path?: string; docstring?: string; qualified_name?: string };
 
         return match;
       });
@@ -130,6 +135,19 @@ export class QdrantGatewayClient {
         `Qdrant search failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  /**
+   * Determine content type from labels
+   */
+  private determineContentType(labels: string[]): "code" | "doc" | "comment" {
+    if (labels.includes("Document") || labels.includes("Doc")) {
+      return "doc";
+    }
+    if (labels.includes("Code") || labels.includes("Function") || labels.includes("Class")) {
+      return "code";
+    }
+    return "code";
   }
 
   /**
