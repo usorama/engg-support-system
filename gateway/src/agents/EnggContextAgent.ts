@@ -181,11 +181,23 @@ export class EnggContextAgent {
 
     const totalLatency = Date.now() - startTime;
 
-    // Extract results
+    // Extract results and capture errors
     const qdrantResult =
       results[0].status === "fulfilled" ? results[0].value : null;
     const neo4jResult =
       results[1].status === "fulfilled" ? results[1].value : null;
+
+    // Capture error messages for debugging
+    const qdrantError = results[0].status === "rejected" ? (results[0].reason as Error).message : null;
+    const neo4jError = results[1].status === "rejected" ? (results[1].reason as Error).message : null;
+
+    // Log errors for debugging
+    if (neo4jError) {
+      console.error(`[EnggContextAgent] Neo4j query failed: ${neo4jError}`);
+    }
+    if (qdrantError) {
+      console.error(`[EnggContextAgent] Qdrant query failed: ${qdrantError}`);
+    }
 
     // Determine response status
     const status = this.determineStatus(
@@ -205,6 +217,8 @@ export class EnggContextAgent {
       qdrantAvailable,
       neo4jAvailable,
       totalLatency,
+      qdrantError,
+      neo4jError,
     });
 
     // If raw mode requested or no synthesis agent, return raw results
@@ -385,6 +399,8 @@ export class EnggContextAgent {
     qdrantAvailable: boolean;
     neo4jAvailable: boolean;
     totalLatency: number;
+    qdrantError?: string | null;
+    neo4jError?: string | null;
   }): QueryResponse {
     const {
       request,
@@ -395,6 +411,8 @@ export class EnggContextAgent {
       qdrantAvailable,
       neo4jAvailable,
       totalLatency,
+      qdrantError,
+      neo4jError,
     } = options;
 
     // Base response
@@ -423,20 +441,26 @@ export class EnggContextAgent {
       },
     };
 
-    // Add warnings for partial results
-    if (!qdrantAvailable || !neo4jAvailable) {
-      const warnings: string[] = [];
-      if (!qdrantAvailable) {
-        warnings.push(
-          "⚠️ Qdrant semantic search unavailable - returning structural results only",
-        );
-      }
-      if (!neo4jAvailable) {
-        warnings.push(
-          "⚠️ Neo4j structural search unavailable - returning semantic results only",
-        );
-      }
+    // Add warnings for partial results or query errors
+    const warnings: string[] = [];
 
+    if (!qdrantAvailable) {
+      warnings.push(
+        "⚠️ Qdrant semantic search unavailable - returning structural results only",
+      );
+    } else if (qdrantError) {
+      warnings.push(`⚠️ Qdrant query failed: ${qdrantError}`);
+    }
+
+    if (!neo4jAvailable) {
+      warnings.push(
+        "⚠️ Neo4j structural search unavailable - returning semantic results only",
+      );
+    } else if (neo4jError) {
+      warnings.push(`⚠️ Neo4j query failed: ${neo4jError}`);
+    }
+
+    if (warnings.length > 0) {
       return {
         ...baseResponse,
         warnings,

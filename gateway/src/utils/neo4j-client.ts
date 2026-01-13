@@ -3,7 +3,7 @@
  * Handles structural graph queries to Neo4j database
  */
 
-import neo4j, { Driver } from "neo4j-driver";
+import neo4j, { Driver, int } from "neo4j-driver";
 import type { StructuralResult, StructuralRelationship } from "../types/agent-contracts.js";
 
 export interface Neo4jClientConfig {
@@ -94,7 +94,7 @@ export class Neo4jGatewayClient {
 
         const result = await session.run(cypher, {
           query,
-          limit: options.limit || 10,
+          limit: int(options.limit || 10),
           project: options.project,
         });
 
@@ -122,9 +122,9 @@ export class Neo4jGatewayClient {
         await session.close();
       }
     } catch (error) {
-      throw new Error(
-        `Neo4j search failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Neo4j] structuralSearch failed for query "${query}":`, errorMessage);
+      throw new Error(`Neo4j search failed: ${errorMessage}`);
     }
   }
 
