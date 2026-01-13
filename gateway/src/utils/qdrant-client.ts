@@ -39,12 +39,14 @@ export class QdrantGatewayClient {
       url: string;
       apiKey?: string;
       timeout: number;
+      checkCompatibility: boolean;
     } = {
       url: config.url,
       timeout: config.timeout || 30000,
+      checkCompatibility: false, // Skip version check for older Qdrant servers
     };
 
-    if (config.apiKey  !==  undefined) {
+    if (config.apiKey !== undefined) {
       clientConfig.apiKey = config.apiKey;
     }
 
