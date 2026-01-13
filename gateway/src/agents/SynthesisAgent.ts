@@ -2,7 +2,9 @@
  * SynthesisAgent - Intelligent Answer Synthesis
  *
  * Bridges the gap between raw Qdrant/Neo4j results and intelligent answers.
- * Uses Ollama llama3.2 to synthesize context-aware responses with citations.
+ * Supports multiple LLM providers:
+ * - Ollama (local)
+ * - Anthropic-compatible APIs (zAI, OpenRouter, etc.)
  *
  * @module SynthesisAgent
  */
@@ -70,14 +72,33 @@ export interface SynthesisOptions {
 }
 
 /**
+ * LLM Provider type
+ */
+export type LLMProvider = "ollama" | "anthropic";
+
+/**
  * SynthesisAgent configuration
  */
 export interface SynthesisAgentConfig {
-  /** Ollama URL */
-  ollamaUrl: string;
-  /** Model name (default: llama3.2) */
+  /** LLM provider type (default: ollama) */
+  provider?: LLMProvider;
+  /** API base URL (Ollama URL or Anthropic-compatible base URL) */
+  baseUrl: string;
+  /** Model name (default: llama3.2 for Ollama, glm-4.7 for Anthropic) */
   model?: string;
+  /** API key (required for Anthropic provider) */
+  apiKey?: string;
   /** Request timeout in ms (default: 30000) */
+  timeout?: number;
+}
+
+/**
+ * Legacy config for backwards compatibility
+ * @deprecated Use SynthesisAgentConfig instead
+ */
+export interface LegacySynthesisAgentConfig {
+  ollamaUrl: string;
+  model?: string;
   timeout?: number;
 }
 
@@ -89,14 +110,30 @@ export interface SynthesisAgentConfig {
  * SynthesisAgent - Synthesizes intelligent answers from raw search results
  */
 export class SynthesisAgent {
-  private readonly ollamaUrl: string;
+  private readonly provider: LLMProvider;
+  private readonly baseUrl: string;
   private readonly model: string;
+  private readonly apiKey?: string;
   private readonly timeout: number;
 
-  constructor(config: SynthesisAgentConfig) {
-    this.ollamaUrl = config.ollamaUrl.replace(/\/$/, "");
-    this.model = config.model ?? "llama3.2";
-    this.timeout = config.timeout ?? 30000;
+  constructor(config: SynthesisAgentConfig | LegacySynthesisAgentConfig) {
+    // Handle legacy config format
+    if ("ollamaUrl" in config) {
+      this.provider = "ollama";
+      this.baseUrl = config.ollamaUrl.replace(/\/$/, "");
+      this.model = config.model ?? "llama3.2";
+      this.timeout = config.timeout ?? 30000;
+      // apiKey not set for legacy Ollama config
+    } else {
+      this.provider = config.provider ?? "ollama";
+      this.baseUrl = config.baseUrl.replace(/\/$/, "");
+      this.model = config.model ?? (this.provider === "anthropic" ? "glm-4.7" : "llama3.2");
+      this.timeout = config.timeout ?? 30000;
+      // Only set apiKey if defined
+      if (config.apiKey !== undefined) {
+        this.apiKey = config.apiKey;
+      }
+    }
   }
 
   /**
@@ -152,30 +189,57 @@ export class SynthesisAgent {
   }
 
   /**
-   * Check if Ollama is available
+   * Check if the LLM provider is available
    */
   async isAvailable(): Promise<boolean> {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      const response = await fetch(`${this.ollamaUrl}/api/tags`, {
-        signal: controller.signal,
-      });
+      if (this.provider === "anthropic") {
+        // For Anthropic-compatible APIs, just check if we have an API key
+        // and the endpoint is reachable
+        if (!this.apiKey) {
+          return false;
+        }
+        // Simple health check - try a minimal request
+        const response = await fetch(`${this.baseUrl}/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: this.model,
+            max_tokens: 1,
+            messages: [{ role: "user", content: "test" }],
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        // 200 or 400 (invalid request) both indicate service is available
+        return response.ok || response.status === 400;
+      } else {
+        // Ollama health check
+        const response = await fetch(`${this.baseUrl}/api/tags`, {
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        return false;
+        if (!response.ok) {
+          return false;
+        }
+
+        const data = (await response.json()) as { models?: Array<{ name: string }> };
+        const models = data.models ?? [];
+
+        // Check if our model is available
+        return models.some(
+          (m) => m.name === this.model || m.name.startsWith(`${this.model}:`)
+        );
       }
-
-      const data = (await response.json()) as { models?: Array<{ name: string }> };
-      const models = data.models ?? [];
-
-      // Check if our model is available
-      return models.some(
-        (m) => m.name === this.model || m.name.startsWith(`${this.model}:`)
-      );
     } catch {
       return false;
     }
@@ -231,7 +295,7 @@ export class SynthesisAgent {
   }
 
   /**
-   * Generate answer using Ollama chat API
+   * Generate answer using the configured LLM provider
    */
   private async generateAnswer(
     query: string,
@@ -266,50 +330,122 @@ Provide your answer with citations:`;
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(`${this.ollamaUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: this.model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          stream: false,
-          options: {
-            temperature: options?.temperature ?? 0.3,
-            num_predict: options?.maxTokens ?? 2048,
-            seed: options?.seed ?? 42,
-          },
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Ollama request failed: ${response.status} ${errorText}`);
+      if (this.provider === "anthropic") {
+        return await this.generateAnswerAnthropic(
+          systemPrompt,
+          userPrompt,
+          options,
+          controller.signal
+        );
+      } else {
+        return await this.generateAnswerOllama(
+          systemPrompt,
+          userPrompt,
+          options,
+          controller.signal
+        );
       }
-
-      const data = (await response.json()) as {
-        message?: { content?: string };
-      };
-
-      if (!data.message?.content) {
-        throw new Error("Invalid response from Ollama: missing message content");
-      }
-
-      return data.message.content.trim();
     } catch (error) {
-      clearTimeout(timeoutId);
-
       if (error instanceof Error && error.name === "AbortError") {
         throw new Error(`Synthesis timed out after ${this.timeout}ms`);
       }
-
       throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
+  }
+
+  /**
+   * Generate answer using Ollama API
+   */
+  private async generateAnswerOllama(
+    systemPrompt: string,
+    userPrompt: string,
+    options: SynthesisOptions | undefined,
+    signal: AbortSignal
+  ): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: this.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        stream: false,
+        options: {
+          temperature: options?.temperature ?? 0.3,
+          num_predict: options?.maxTokens ?? 2048,
+          seed: options?.seed ?? 42,
+        },
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Ollama request failed: ${response.status} ${errorText}`);
+    }
+
+    const data = (await response.json()) as {
+      message?: { content?: string };
+    };
+
+    if (!data.message?.content) {
+      throw new Error("Invalid response from Ollama: missing message content");
+    }
+
+    return data.message.content.trim();
+  }
+
+  /**
+   * Generate answer using Anthropic-compatible API (zAI, OpenRouter, etc.)
+   */
+  private async generateAnswerAnthropic(
+    systemPrompt: string,
+    userPrompt: string,
+    options: SynthesisOptions | undefined,
+    signal: AbortSignal
+  ): Promise<string> {
+    if (!this.apiKey) {
+      throw new Error("API key required for Anthropic provider");
+    }
+
+    const response = await fetch(`${this.baseUrl}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: options?.maxTokens ?? 2048,
+        system: systemPrompt,
+        messages: [
+          { role: "user", content: userPrompt },
+        ],
+        temperature: options?.temperature ?? 0.3,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Anthropic API request failed: ${response.status} ${errorText}`);
+    }
+
+    const data = (await response.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+    };
+
+    const textContent = data.content?.find((c) => c.type === "text");
+    if (!textContent?.text) {
+      throw new Error("Invalid response from Anthropic API: missing text content");
+    }
+
+    return textContent.text.trim();
   }
 
   /**
@@ -531,45 +667,108 @@ Provide your answer with citations:`;
 // ============================================================================
 
 /**
- * Create a SynthesisAgent for local development
+ * Create a SynthesisAgent for local development with Ollama
  */
 export function createLocalSynthesisAgent(
   ollamaPort = 11434
 ): SynthesisAgent {
   return new SynthesisAgent({
-    ollamaUrl: `http://localhost:${ollamaPort}`,
+    provider: "ollama",
+    baseUrl: `http://localhost:${ollamaPort}`,
   });
 }
 
 /**
  * Create a SynthesisAgent for VPS deployment
+ * Prefers zAI API if configured, falls back to Ollama
  */
 export function createVPSSynthesisAgent(): SynthesisAgent {
+  // Check for Anthropic-compatible API (zAI, etc.)
+  const anthropicBaseUrl = process.env.SYNTHESIS_API_URL || process.env.ANTHROPIC_BASE_URL;
+  const anthropicApiKey = process.env.SYNTHESIS_API_KEY || process.env.ANTHROPIC_API_KEY;
+
+  if (anthropicBaseUrl && anthropicApiKey) {
+    return new SynthesisAgent({
+      provider: "anthropic",
+      baseUrl: anthropicBaseUrl,
+      apiKey: anthropicApiKey,
+      model: process.env.SYNTHESIS_MODEL || process.env.ANTHROPIC_MODEL || "glm-4.7",
+      timeout: 60000,
+    });
+  }
+
+  // Fall back to Ollama
   return new SynthesisAgent({
-    ollamaUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
-    timeout: 60000, // Longer timeout for VPS
+    provider: "ollama",
+    baseUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
+    timeout: 60000,
   });
 }
 
 /**
- * Create a SynthesisAgent from environment
+ * Create a SynthesisAgent from environment variables
+ *
+ * Supports two configurations:
+ * 1. Anthropic-compatible API (zAI, OpenRouter):
+ *    - SYNTHESIS_PROVIDER=anthropic
+ *    - SYNTHESIS_API_URL or ANTHROPIC_BASE_URL
+ *    - SYNTHESIS_API_KEY or ANTHROPIC_API_KEY
+ *    - SYNTHESIS_MODEL or ANTHROPIC_MODEL (default: glm-4.7)
+ *
+ * 2. Ollama:
+ *    - SYNTHESIS_PROVIDER=ollama (or unset)
+ *    - OLLAMA_URL (required)
+ *    - OLLAMA_MODEL (default: llama3.2)
  */
 export function createSynthesisAgentFromEnv(): SynthesisAgent {
+  const provider = (process.env.SYNTHESIS_PROVIDER ?? "ollama") as LLMProvider;
+
+  if (provider === "anthropic") {
+    const baseUrl = process.env.SYNTHESIS_API_URL || process.env.ANTHROPIC_BASE_URL;
+    const apiKey = process.env.SYNTHESIS_API_KEY || process.env.ANTHROPIC_API_KEY;
+
+    if (!baseUrl || !apiKey) {
+      throw new Error(
+        "SYNTHESIS_API_URL/ANTHROPIC_BASE_URL and SYNTHESIS_API_KEY/ANTHROPIC_API_KEY are required for anthropic provider"
+      );
+    }
+
+    return new SynthesisAgent({
+      provider: "anthropic",
+      baseUrl,
+      apiKey,
+      model: process.env.SYNTHESIS_MODEL || process.env.ANTHROPIC_MODEL || "glm-4.7",
+      timeout: process.env.SYNTHESIS_TIMEOUT ? parseInt(process.env.SYNTHESIS_TIMEOUT, 10) : 60000,
+    });
+  }
+
+  // Ollama provider
   const ollamaUrl = process.env.OLLAMA_URL;
 
   if (!ollamaUrl) {
-    throw new Error("OLLAMA_URL environment variable is required");
+    throw new Error("OLLAMA_URL environment variable is required for ollama provider");
   }
 
-  const config: SynthesisAgentConfig = {
-    ollamaUrl,
+  return new SynthesisAgent({
+    provider: "ollama",
+    baseUrl: ollamaUrl,
     model: process.env.OLLAMA_MODEL ?? "llama3.2",
-  };
+    timeout: process.env.OLLAMA_TIMEOUT ? parseInt(process.env.OLLAMA_TIMEOUT, 10) : 30000,
+  });
+}
 
-  // Only add timeout if explicitly set in environment
-  if (process.env.OLLAMA_TIMEOUT) {
-    config.timeout = parseInt(process.env.OLLAMA_TIMEOUT, 10);
-  }
-
-  return new SynthesisAgent(config);
+/**
+ * Create a SynthesisAgent with zAI API (GLM-4.7)
+ */
+export function createZAISynthesisAgent(
+  apiKey: string,
+  options?: { model?: string; timeout?: number }
+): SynthesisAgent {
+  return new SynthesisAgent({
+    provider: "anthropic",
+    baseUrl: "https://api.z.ai/api/anthropic",
+    apiKey,
+    model: options?.model ?? "glm-4.7",
+    timeout: options?.timeout ?? 60000,
+  });
 }
