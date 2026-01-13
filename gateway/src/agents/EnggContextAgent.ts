@@ -19,12 +19,14 @@ import type {
   GatewayResponse,
   ConversationResponse,
   ConversationRequest,
+  SynthesizedAnswer,
 } from "../types/agent-contracts.js";
 import { QdrantGatewayClient, type QdrantClientConfig } from "../utils/qdrant-client.js";
 import { Neo4jGatewayClient } from "../utils/neo4j-client.js";
 import { classifyQuery, type QueryClassification } from "./QueryClassifier.js";
 import { generateClarifications } from "./ClarificationGenerator.js";
 import { conversationManager } from "./ConversationManager.js";
+import { SynthesisAgent } from "./SynthesisAgent.js";
 
 export interface EnggContextAgentConfig {
   qdrant: {
@@ -40,6 +42,8 @@ export interface EnggContextAgentConfig {
   ollama?: {
     url: string;
     embedModel: string;
+    /** Model for synthesis (default: llama3.2) */
+    synthesisModel?: string;
   };
 }
 
@@ -52,6 +56,7 @@ export class EnggContextAgent {
   private neo4jClient: Neo4jGatewayClient;
   private ollamaUrl?: string;
   private ollamaModel?: string;
+  private synthesisAgent?: SynthesisAgent;
 
   constructor(config: EnggContextAgentConfig) {
     const qdrantConfig: QdrantClientConfig = {
@@ -74,6 +79,12 @@ export class EnggContextAgent {
     if (config.ollama !== undefined) {
       this.ollamaUrl = config.ollama.url;
       this.ollamaModel = config.ollama.embedModel;
+
+      // Initialize SynthesisAgent for intelligent answer generation
+      this.synthesisAgent = new SynthesisAgent({
+        ollamaUrl: config.ollama.url,
+        model: config.ollama.synthesisModel ?? "llama3.2",
+      });
     }
   }
 
@@ -148,8 +159,8 @@ export class EnggContextAgent {
       neo4jResult,
     );
 
-    // Build response
-    return this.buildResponse({
+    // Build base response (raw results)
+    const baseResponse = this.buildResponse({
       request,
       queryType,
       status,
@@ -159,6 +170,41 @@ export class EnggContextAgent {
       neo4jAvailable,
       totalLatency,
     });
+
+    // If raw mode requested or no synthesis agent, return raw results
+    if (request.synthesisMode === "raw" || !this.synthesisAgent) {
+      return baseResponse;
+    }
+
+    // Synthesize intelligent answer
+    try {
+      const synthesisResult = await this.synthesisAgent.synthesize(
+        request.query,
+        baseResponse.results.semantic,
+        baseResponse.results.structural,
+      );
+
+      // Return enriched response with answer and insights
+      return {
+        ...baseResponse,
+        answer: synthesisResult.answer,
+        results: {
+          ...baseResponse.results,
+          insights: synthesisResult.insights,
+        },
+      } as QueryResponse;
+    } catch (synthesisError) {
+      // If synthesis fails, return raw results with warning
+      const warnings = [
+        ...(("warnings" in baseResponse ? baseResponse.warnings : []) as string[]),
+        `⚠️ Synthesis unavailable: ${synthesisError instanceof Error ? synthesisError.message : "Unknown error"}`,
+      ];
+
+      return {
+        ...baseResponse,
+        warnings,
+      } as QueryResponse;
+    }
   }
 
   /**

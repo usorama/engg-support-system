@@ -136,6 +136,49 @@ export interface CombinedInsights {
   recommendations?: string[];
 }
 
+// ============================================================================
+// SYNTHESIS TYPES (Answer Generation)
+// ============================================================================
+
+/**
+ * Citation from synthesized answer
+ */
+export interface SynthesisCitation {
+  /** Source file path or graph reference */
+  source: string;
+
+  /** Line start (for code sources) */
+  lineStart?: number;
+
+  /** Line end (for code sources) */
+  lineEnd?: number;
+
+  /** Relevance score (0-1) */
+  relevance: number;
+
+  /** Source type */
+  type: "code" | "doc" | "graph";
+}
+
+/**
+ * Synthesized answer from SynthesisAgent
+ */
+export interface SynthesizedAnswer {
+  /** The synthesized answer text (Markdown) */
+  text: string;
+
+  /** Confidence score (0-1) */
+  confidence: number;
+
+  /** Evidence citations */
+  citations: SynthesisCitation[];
+}
+
+/**
+ * Synthesis mode for query requests
+ */
+export type SynthesisMode = "synthesized" | "raw";
+
 /**
  * Query results from both databases
  */
@@ -198,6 +241,9 @@ export interface QueryResponseBase {
   /** Query type classification */
   queryType: QueryIntent;
 
+  /** Synthesized answer (when synthesisMode !== "raw") */
+  answer?: SynthesizedAnswer;
+
   /** Query results */
   results: QueryResults;
 
@@ -239,6 +285,9 @@ export type QueryMode = "one-shot" | "conversational";
 export interface QueryRequestWithMode extends QueryRequest {
   /** Query mode (optional - auto-detected if not specified) */
   mode?: QueryMode;
+
+  /** Synthesis mode: "synthesized" (default) returns intelligent answer, "raw" returns search results only */
+  synthesisMode?: SynthesisMode;
 }
 
 /**

@@ -43,6 +43,7 @@ const config: EnggContextAgentConfig = {
   ollama: {
     url: process.env.OLLAMA_URL ?? "http://localhost:11434",
     embedModel: process.env.EMBEDDING_MODEL ?? "nomic-embed-text",
+    synthesisModel: process.env.SYNTHESIS_MODEL ?? "llama3.2",
   },
 };
 
@@ -189,6 +190,8 @@ interface QueryRequestBody {
   project?: string;
   context?: string[];
   mode?: "one-shot" | "conversational";
+  /** Synthesis mode: "synthesized" (default) returns intelligent answer, "raw" returns search results only */
+  synthesisMode?: "synthesized" | "raw";
 }
 
 app.post("/query", asyncHandler(async (req: Request, res: Response) => {
@@ -207,6 +210,7 @@ app.post("/query", asyncHandler(async (req: Request, res: Response) => {
     requestId: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
     mode: body.mode ?? "one-shot",
+    synthesisMode: body.synthesisMode ?? "synthesized", // Default to synthesized mode
     ...(body.project !== undefined && { project: body.project }),
     ...(body.context !== undefined && { context: body.context }),
   };
@@ -236,6 +240,7 @@ app.post("/conversation", asyncHandler(async (req: Request, res: Response) => {
     requestId: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
     mode: "conversational",
+    synthesisMode: body.synthesisMode ?? "synthesized", // Default to synthesized mode
     ...(body.project !== undefined && { project: body.project }),
     ...(body.context !== undefined && { context: body.context }),
   };
