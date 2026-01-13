@@ -23,10 +23,10 @@ import type {
 } from "../types/agent-contracts.js";
 import { QdrantGatewayClient, type QdrantClientConfig } from "../utils/qdrant-client.js";
 import { Neo4jGatewayClient } from "../utils/neo4j-client.js";
+import { SynthesisAgent, type SynthesisAgentConfig } from "./SynthesisAgent.js";
 import { classifyQuery, type QueryClassification } from "./QueryClassifier.js";
 import { generateClarifications } from "./ClarificationGenerator.js";
 import { conversationManager } from "./ConversationManager.js";
-import { SynthesisAgent } from "./SynthesisAgent.js";
 
 export interface EnggContextAgentConfig {
   qdrant: {
@@ -42,8 +42,21 @@ export interface EnggContextAgentConfig {
   ollama?: {
     url: string;
     embedModel: string;
-    /** Model for synthesis (default: llama3.2) */
+    /** Model for synthesis (default: llama3.2) - only used if synthesis not configured */
     synthesisModel?: string;
+  };
+  /** Optional separate synthesis configuration for using different LLM providers (e.g., zAI) */
+  synthesis?: {
+    /** LLM provider: "ollama" | "anthropic" */
+    provider: "ollama" | "anthropic";
+    /** API base URL */
+    baseUrl: string;
+    /** API key (required for anthropic provider) */
+    apiKey?: string;
+    /** Model name (default: glm-4.7 for anthropic, llama3.2 for ollama) */
+    model?: string;
+    /** Request timeout in ms */
+    timeout?: number;
   };
 }
 
@@ -76,13 +89,36 @@ export class EnggContextAgent {
       password: config.neo4j.password,
     });
 
+    // Configure Ollama for embeddings
     if (config.ollama !== undefined) {
       this.ollamaUrl = config.ollama.url;
       this.ollamaModel = config.ollama.embedModel;
+    }
 
-      // Initialize SynthesisAgent for intelligent answer generation
+    // Initialize SynthesisAgent for intelligent answer generation
+    // Prefer dedicated synthesis config, fall back to Ollama if available
+    if (config.synthesis !== undefined) {
+      // Use dedicated synthesis provider (e.g., zAI)
+      const synthesisConfig: SynthesisAgentConfig = {
+        provider: config.synthesis.provider,
+        baseUrl: config.synthesis.baseUrl,
+      };
+      // Only add optional properties if defined
+      if (config.synthesis.apiKey !== undefined) {
+        synthesisConfig.apiKey = config.synthesis.apiKey;
+      }
+      if (config.synthesis.model !== undefined) {
+        synthesisConfig.model = config.synthesis.model;
+      }
+      if (config.synthesis.timeout !== undefined) {
+        synthesisConfig.timeout = config.synthesis.timeout;
+      }
+      this.synthesisAgent = new SynthesisAgent(synthesisConfig);
+    } else if (config.ollama !== undefined) {
+      // Fall back to Ollama for synthesis
       this.synthesisAgent = new SynthesisAgent({
-        ollamaUrl: config.ollama.url,
+        provider: "ollama",
+        baseUrl: config.ollama.url,
         model: config.ollama.synthesisModel ?? "llama3.2",
       });
     }

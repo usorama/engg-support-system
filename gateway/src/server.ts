@@ -47,6 +47,20 @@ const config: EnggContextAgentConfig = {
   },
 };
 
+// Configure synthesis provider (zAI via Anthropic-compatible API if configured)
+const synthesisApiUrl = process.env.SYNTHESIS_API_URL || process.env.ANTHROPIC_BASE_URL;
+const synthesisApiKey = process.env.SYNTHESIS_API_KEY || process.env.ANTHROPIC_API_KEY;
+
+if (synthesisApiUrl && synthesisApiKey) {
+  config.synthesis = {
+    provider: "anthropic",
+    baseUrl: synthesisApiUrl,
+    apiKey: synthesisApiKey,
+    model: process.env.SYNTHESIS_MODEL || process.env.ANTHROPIC_MODEL || "glm-4.7",
+    timeout: process.env.SYNTHESIS_TIMEOUT ? parseInt(process.env.SYNTHESIS_TIMEOUT, 10) : 60000,
+  };
+}
+
 // Initialize agent
 let agent: EnggContextAgent;
 
