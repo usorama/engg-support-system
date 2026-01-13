@@ -872,15 +872,15 @@ export function createSynthesisAgentFromEnv(): SynthesisAgent {
 
 /**
  * Create a SynthesisAgent with zAI API (GLM-4.7)
- * Uses OpenAI-compatible endpoint at https://api.z.ai/api/paas/v4
+ * Uses Anthropic-compatible endpoint at https://api.z.ai/api/anthropic/v1
  */
 export function createZAISynthesisAgent(
   apiKey: string,
   options?: { model?: string; timeout?: number }
 ): SynthesisAgent {
   return new SynthesisAgent({
-    provider: "openai",
-    baseUrl: "https://api.z.ai/api/paas/v4",
+    provider: "anthropic",
+    baseUrl: "https://api.z.ai/api/anthropic/v1",
     apiKey,
     model: options?.model ?? "glm-4.7",
     timeout: options?.timeout ?? 60000,
