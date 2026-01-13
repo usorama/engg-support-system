@@ -1,0 +1,50 @@
+# ESS Gateway - Caddy TLS Configuration
+# Automatic HTTPS with Let's Encrypt
+
+{$ESS_DOMAIN:localhost} {
+    # TLS termination (automatic cert management)
+    tls {$ADMIN_EMAIL:admin@example.com}
+
+    # Reverse proxy to gateway
+    reverse_proxy gateway:3001 {
+        # Health checks
+        health_uri /health
+        health_interval 30s
+        health_timeout 10s
+
+        # Headers
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Content-Security-Policy "default-src 'self'"
+        -Server
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/ess-access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+        format json
+    }
+
+    # Error handling
+    handle_errors {
+        respond "{http.error.status_code} {http.error.status_text}"
+    }
+}
+
+# Health check endpoint (no TLS required for internal monitoring)
+:8080 {
+    respond /health "OK" 200
+}

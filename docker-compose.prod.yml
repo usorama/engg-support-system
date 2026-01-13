@@ -1,0 +1,158 @@
+# ESS Production Docker Compose with TLS
+# Uses Caddy for automatic HTTPS via Let's Encrypt
+
+version: '3.8'
+
+services:
+  # TLS Termination (Edge)
+  caddy:
+    image: caddy:2-alpine
+    container_name: ess-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Internal health check
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    environment:
+      ESS_DOMAIN: ${ESS_DOMAIN:-localhost}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # HTTP Gateway (Internal - no external port exposure)
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: ess-gateway
+    restart: always
+    # No external ports - accessed via Caddy only
+    expose:
+      - "3001"
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password123}
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379
+      OLLAMA_URL: http://ollama:11434
+      EMBEDDING_MODEL: nomic-embed-text
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5.15.0
+    container_name: ess-neo4j
+    restart: always
+    expose:
+      - "7474"
+      - "7687"
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password123}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_initial__size: 512m
+      NEO4J_dbms_memory_heap_max__size: 1G
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7474"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: ess-qdrant
+    restart: always
+    expose:
+      - "6333"
+      - "6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:6333/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis (Queue + Cache)
+  redis:
+    image: redis:7-alpine
+    container_name: ess-redis
+    restart: always
+    expose:
+      - "6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Ollama (Embeddings + LLM)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ess-ollama
+    restart: always
+    expose:
+      - "11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - ess_network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+networks:
+  ess_network:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:
+  neo4j_data:
+  neo4j_logs:
+  qdrant_data:
+  redis_data:
+  ollama_data:

@@ -1,0 +1,61 @@
+# ESS Local Development Docker Compose
+# Uses non-conflicting ports to avoid conflicts with other projects
+
+services:
+  neo4j:
+    image: neo4j:5.15.0
+    container_name: ess-neo4j-local
+    ports:
+      - "7474:7474"  # Browser
+      - "7687:7687"  # Bolt
+    environment:
+      NEO4J_AUTH: neo4j/password123
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_local:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: ess-qdrant-local
+    ports:
+      - "6333:6333"  # HTTP
+      - "6334:6334"  # gRPC
+    volumes:
+      - qdrant_local:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ess-redis-local
+    ports:
+      - "6380:6379"  # Use 6380 to avoid conflict with other projects
+    volumes:
+      - redis_local:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ess-ollama-local
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_local:/root/.ollama
+
+volumes:
+  neo4j_local:
+  qdrant_local:
+  redis_local:
+  ollama_local:

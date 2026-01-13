@@ -1,0 +1,228 @@
+{
+  "project": {
+    "name": "Project Name",
+    "version": "0.1.0",
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z"
+  },
+  "metadata": {
+    "current_sprint": 1,
+    "total_tasks": 10,
+    "completed_tasks": 0,
+    "blocked_tasks": 0
+  },
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "type": "setup",
+      "priority": "P0",
+      "phase": 0,
+      "description": "Initialize project repository and tooling",
+      "dependencies": [],
+      "context_files": [
+        "package.json",
+        "tsconfig.json",
+        ".eslintrc.js"
+      ],
+      "instruction": "1. Initialize git repository\n2. Create package.json with project metadata\n3. Configure TypeScript with strict mode\n4. Set up ESLint and Prettier\n5. Configure path aliases\n6. Add pre-commit hooks with husky",
+      "verification": {
+        "type": "command_success",
+        "command": "pnpm run typecheck && pnpm run lint"
+      },
+      "status": "pending",
+      "estimate_hours": 2,
+      "tags": ["foundation", "tooling", "dx"]
+    },
+    {
+      "id": "TASK-002",
+      "type": "setup",
+      "priority": "P0",
+      "phase": 0,
+      "description": "Set up CI/CD pipeline",
+      "dependencies": ["TASK-001"],
+      "context_files": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/deploy.yml"
+      ],
+      "instruction": "Create GitHub Actions workflows:\n1. CI workflow: lint, typecheck, test on PR\n2. Deploy workflow: build and deploy on merge to main\n3. Add status badges to README",
+      "verification": {
+        "type": "file_exists",
+        "files": [
+          ".github/workflows/ci.yml"
+        ]
+      },
+      "status": "pending",
+      "estimate_hours": 3,
+      "tags": ["ci-cd", "automation"]
+    },
+    {
+      "id": "TASK-003",
+      "type": "config",
+      "priority": "P0",
+      "phase": 0,
+      "description": "Configure environment variables and secrets",
+      "dependencies": ["TASK-001"],
+      "context_files": [
+        ".env.example",
+        "src/lib/env.ts"
+      ],
+      "instruction": "1. Create .env.example with all required variables\n2. Create typed env validation with zod\n3. Document each variable in comments\n4. Add .env to .gitignore",
+      "verification": {
+        "type": "file_exists",
+        "files": [
+          ".env.example",
+          "src/lib/env.ts"
+        ]
+      },
+      "status": "pending",
+      "estimate_hours": 1,
+      "tags": ["config", "security"]
+    },
+    {
+      "id": "TASK-010",
+      "type": "code",
+      "priority": "P1",
+      "phase": 1,
+      "description": "Implement core data models and types",
+      "dependencies": ["TASK-001"],
+      "context_files": [
+        "src/types/index.ts",
+        "src/types/models.ts"
+      ],
+      "instruction": "Define TypeScript interfaces for:\n1. User model with roles\n2. Core entity models\n3. API request/response types\n4. Common utility types\n\nUse strict types - no 'any'.",
+      "verification": {
+        "type": "lint_pass",
+        "command": "pnpm run typecheck"
+      },
+      "status": "pending",
+      "estimate_hours": 3,
+      "tags": ["types", "core"]
+    },
+    {
+      "id": "TASK-011",
+      "type": "code",
+      "priority": "P1",
+      "phase": 1,
+      "description": "Create base UI components",
+      "dependencies": ["TASK-001", "TASK-010"],
+      "context_files": [
+        "src/components/ui/Button.tsx",
+        "src/components/ui/Input.tsx",
+        "src/components/ui/Card.tsx"
+      ],
+      "instruction": "Create reusable UI components:\n1. Button with variants (primary, secondary, ghost)\n2. Input with validation states\n3. Card with header, body, footer\n4. Use Tailwind for styling\n5. Add proper TypeScript props",
+      "verification": {
+        "type": "test_pass",
+        "command": "pnpm test src/components/ui/"
+      },
+      "status": "pending",
+      "estimate_hours": 5,
+      "tags": ["ui", "components"]
+    },
+    {
+      "id": "TASK-012",
+      "type": "code",
+      "priority": "P1",
+      "phase": 1,
+      "description": "Implement authentication flow",
+      "dependencies": ["TASK-010", "TASK-011"],
+      "context_files": [
+        "src/features/auth/AuthContext.tsx",
+        "src/features/auth/useAuth.ts",
+        "src/features/auth/LoginForm.tsx"
+      ],
+      "instruction": "1. Create AuthContext with user state\n2. Implement useAuth hook with login, logout, register\n3. Create LoginForm and RegisterForm components\n4. Add protected route wrapper\n5. Handle loading and error states",
+      "verification": {
+        "type": "test_pass",
+        "command": "pnpm test src/features/auth/"
+      },
+      "status": "pending",
+      "estimate_hours": 8,
+      "tags": ["auth", "mvp"]
+    },
+    {
+      "id": "TASK-020",
+      "type": "test",
+      "priority": "P1",
+      "phase": 1,
+      "description": "Add unit tests for authentication",
+      "dependencies": ["TASK-012"],
+      "context_files": [
+        "src/features/auth/__tests__/useAuth.test.ts",
+        "src/features/auth/__tests__/AuthContext.test.tsx"
+      ],
+      "instruction": "Write comprehensive tests:\n1. useAuth hook - all methods\n2. AuthContext - state management\n3. Mock external auth provider\n4. Test error scenarios\n5. Achieve 85% coverage",
+      "verification": {
+        "type": "command_success",
+        "command": "pnpm test --coverage src/features/auth/ && node -e \"const c = require('./coverage/coverage-summary.json'); if(c.total.lines.pct < 85) process.exit(1)\""
+      },
+      "status": "pending",
+      "estimate_hours": 4,
+      "tags": ["testing", "auth"]
+    },
+    {
+      "id": "TASK-030",
+      "type": "refactor",
+      "priority": "P2",
+      "phase": 2,
+      "description": "Extract common patterns into custom hooks",
+      "dependencies": ["TASK-012", "TASK-020"],
+      "context_files": [
+        "src/hooks/useAsync.ts",
+        "src/hooks/useLocalStorage.ts",
+        "src/hooks/useDebounce.ts"
+      ],
+      "instruction": "Identify repeated patterns and extract:\n1. useAsync for async operations with loading/error\n2. useLocalStorage for persistent state\n3. useDebounce for input debouncing\n4. Add TypeScript generics for type safety",
+      "verification": {
+        "type": "test_pass",
+        "command": "pnpm test src/hooks/"
+      },
+      "status": "pending",
+      "estimate_hours": 4,
+      "tags": ["refactor", "hooks", "dx"]
+    },
+    {
+      "id": "TASK-040",
+      "type": "doc",
+      "priority": "P2",
+      "phase": 5,
+      "description": "Create developer documentation",
+      "dependencies": ["TASK-001", "TASK-010", "TASK-011"],
+      "context_files": [
+        "docs/DEVELOPMENT.md",
+        "docs/ARCHITECTURE.md"
+      ],
+      "instruction": "Document:\n1. Getting started guide\n2. Project structure overview\n3. Component library usage\n4. State management patterns\n5. Testing conventions\n6. Deployment process",
+      "verification": {
+        "type": "file_exists",
+        "files": [
+          "docs/DEVELOPMENT.md",
+          "docs/ARCHITECTURE.md"
+        ]
+      },
+      "status": "pending",
+      "estimate_hours": 4,
+      "tags": ["documentation"]
+    },
+    {
+      "id": "TASK-050",
+      "type": "deploy",
+      "priority": "P1",
+      "phase": 5,
+      "description": "Deploy to staging environment",
+      "dependencies": ["TASK-002", "TASK-012", "TASK-020"],
+      "context_files": [
+        ".github/workflows/deploy.yml",
+        "vercel.json"
+      ],
+      "instruction": "1. Configure staging environment\n2. Set up environment variables\n3. Deploy to staging\n4. Verify all features work\n5. Set up monitoring",
+      "verification": {
+        "type": "manual",
+        "criteria": "Staging URL accessible, login flow works, no console errors"
+      },
+      "status": "pending",
+      "estimate_hours": 3,
+      "tags": ["deploy", "staging"]
+    }
+  ]
+}
