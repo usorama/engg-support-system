@@ -160,22 +160,38 @@ set +a
 # Create Docker network if not exists
 docker network create ess-network 2>/dev/null || true
 
-# Start Gateway container
-# Connect to existing infrastructure on host network
+# Get Docker host gateway IP (for accessing host services like Ollama)
+DOCKER_HOST_IP=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+echo "[INFO] Docker host IP: $DOCKER_HOST_IP"
+
+# Ensure infrastructure containers are on ess-network
+echo "[START] Connecting infrastructure to ess-network..."
+for container in ess-neo4j ess-qdrant ess-redis; do
+    docker network connect ess-network "$container" 2>/dev/null || true
+done
+
+# Start Gateway container (use Docker networking, not host)
 echo "[START] Starting Gateway..."
 docker run -d \
     --name ess-gateway \
     --restart unless-stopped \
-    --network host \
+    --network ess-network \
+    -p 3001:3001 \
+    --health-cmd='wget -q -O- http://localhost:3001/health || exit 1' \
+    --health-interval=30s \
+    --health-timeout=10s \
+    --health-retries=3 \
     -e NODE_ENV=production \
     -e PORT=3001 \
-    -e NEO4J_URI=bolt://localhost:7688 \
+    -e NEO4J_URI=bolt://ess-neo4j:7687 \
     -e NEO4J_USER="${NEO4J_USER:-neo4j}" \
     -e NEO4J_PASSWORD="${NEO4J_PASSWORD}" \
-    -e QDRANT_URL=http://localhost:6335 \
-    -e REDIS_URL=redis://localhost:6379 \
-    -e OLLAMA_URL=http://localhost:11434 \
+    -e QDRANT_URL=http://ess-qdrant:6333 \
+    -e QDRANT_COLLECTION="${QDRANT_COLLECTION:-ess_knowledge_base}" \
+    -e REDIS_URL=redis://ess-redis:6379 \
+    -e OLLAMA_URL="http://${DOCKER_HOST_IP}:11434" \
     -e EMBEDDING_MODEL="${EMBEDDING_MODEL:-nomic-embed-text}" \
+    -e SYNTHESIS_MODEL="${SYNTHESIS_MODEL:-llama3.2}" \
     -e ESS_API_KEY="${ESS_API_KEY:-}" \
     -e ADMIN_TOKEN="${ADMIN_TOKEN:-}" \
     ess-gateway:latest
@@ -191,18 +207,19 @@ for i in {1..30}; do
     sleep 2
 done
 
-# Start Chat UI container
+# Start Chat UI container (on same network)
 echo "[START] Starting Chat UI..."
 docker run -d \
     --name ess-chat-ui \
     --restart unless-stopped \
+    --network ess-network \
     -p 3002:80 \
     ess-chat-ui:latest
 
 # Wait for chat UI
 echo "[START] Waiting for Chat UI health..."
 for i in {1..15}; do
-    if curl -sf http://localhost:3002/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:3002/ > /dev/null 2>&1; then
         echo "[START] Chat UI is healthy!"
         break
     fi
