@@ -86,8 +86,8 @@ services:
     networks:
       - ess_network
     healthcheck:
-      # Accept both 200 (healthy) and 207 (degraded) as passing
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health 2>&1 | grep -q status || exit 1"]
+      # Use node to check health - accepts any 2xx status including 207 (degraded)
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/health').then(r=>{if(r.ok||r.status===207)process.exit(0);else process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 10s
       retries: 3
