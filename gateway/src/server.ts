@@ -13,9 +13,25 @@
 
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
+import { Redis } from "ioredis";
 import { EnggContextAgent, type EnggContextAgentConfig } from "./agents/EnggContextAgent.js";
 import { conversationManager } from "./agents/ConversationManager.js";
 import { QueryMetricsStore, type FeedbackType } from "./metrics/QueryMetrics.js";
+import { createAuthMiddleware } from "./middleware/auth.js";
+import { createQueryRateLimiter, createConversationRateLimiter } from "./middleware/rateLimit.js";
+import {
+  HealthMonitor,
+  createESSHealthMonitor,
+  AlertManager,
+  createAlertManagerFromEnv,
+  RecoveryEngine,
+  createESSRecoveryEngine,
+  type ServiceHealth as MonitoringServiceHealth,
+} from "./monitoring/index.js";
+import {
+  CircuitBreakerRegistry,
+  createESSCircuitBreakers,
+} from "./utils/CircuitBreaker.js";
 import type {
   QueryRequest,
   QueryRequestWithMode,
@@ -23,11 +39,31 @@ import type {
   GatewayResponse,
 } from "./types/agent-contracts.js";
 import * as fs from "fs";
+import * as path from "path";
 
-// Environment configuration with defaults
+// =============================================================================
+// Environment validation - fail fast if required vars missing
+// =============================================================================
+function requireEnv(name: string, fallback?: string): string {
+  const value = process.env[name] ?? fallback;
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+function warnWeakCredential(name: string, value: string): void {
+  const weakPatterns = ["password", "123", "test", "secret", "admin", "changeme"];
+  const isWeak = weakPatterns.some((p) => value.toLowerCase().includes(p));
+  if (isWeak && process.env.NODE_ENV === "production") {
+    console.error(`[SECURITY WARNING] ${name} appears to be a weak credential. Change it immediately!`);
+  }
+}
+
+// Environment configuration with validation
 const qdrantConfig: EnggContextAgentConfig["qdrant"] = {
-  url: process.env.QDRANT_URL ?? "http://localhost:6333",
-  collection: process.env.QDRANT_COLLECTION ?? "engineering_kb",
+  url: requireEnv("QDRANT_URL", "http://localhost:6333"),
+  collection: requireEnv("QDRANT_COLLECTION", "engineering_kb"),
 };
 
 // Only add apiKey if it's defined
@@ -35,17 +71,21 @@ if (process.env.QDRANT_API_KEY) {
   qdrantConfig.apiKey = process.env.QDRANT_API_KEY;
 }
 
+// Neo4j password is required - no fallback to weak default
+const neo4jPassword = requireEnv("NEO4J_PASSWORD");
+warnWeakCredential("NEO4J_PASSWORD", neo4jPassword);
+
 const config: EnggContextAgentConfig = {
   qdrant: qdrantConfig,
   neo4j: {
-    uri: process.env.NEO4J_URI ?? "bolt://localhost:7687",
-    user: process.env.NEO4J_USER ?? "neo4j",
-    password: process.env.NEO4J_PASSWORD ?? "password123",
+    uri: requireEnv("NEO4J_URI", "bolt://localhost:7687"),
+    user: requireEnv("NEO4J_USER", "neo4j"),
+    password: neo4jPassword,
   },
   ollama: {
-    url: process.env.OLLAMA_URL ?? "http://localhost:11434",
-    embedModel: process.env.EMBEDDING_MODEL ?? "nomic-embed-text",
-    synthesisModel: process.env.SYNTHESIS_MODEL ?? "llama3.2",
+    url: requireEnv("OLLAMA_URL", "http://localhost:11434"),
+    embedModel: requireEnv("EMBEDDING_MODEL", "nomic-embed-text"),
+    synthesisModel: requireEnv("SYNTHESIS_MODEL", "llama3.2"),
   },
 };
 
@@ -70,6 +110,13 @@ if (synthesisApiUrl && synthesisApiKey) {
 let agent: EnggContextAgent;
 const metricsStore = new QueryMetricsStore(7); // 7-day TTL
 
+// Initialize monitoring components
+let healthMonitor: HealthMonitor;
+let alertManager: AlertManager;
+let recoveryEngine: RecoveryEngine;
+let circuitBreakers: CircuitBreakerRegistry;
+let monitoringRedis: Redis | null = null;
+
 // Load confidence weights config
 function loadConfidenceWeights(): {
   weights: { semanticScore: number; structuralPresence: number; citationCoverage: number };
@@ -91,6 +138,28 @@ function loadConfidenceWeights(): {
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve static files from public directory (dashboard, etc.)
+const publicDir = path.join(path.dirname(new URL(import.meta.url).pathname), "../public");
+app.use(express.static(publicDir));
+
+// Dashboard route
+app.get("/dashboard", (_req, res) => {
+  res.sendFile(path.join(publicDir, "dashboard.html"));
+});
+
+// =============================================================================
+// SECURITY MIDDLEWARE
+// =============================================================================
+
+// API key authentication (skipped for /health endpoint)
+const authMiddleware = createAuthMiddleware({
+  excludePaths: ["/health", "/"],
+});
+
+// Rate limiting
+const queryRateLimiter = createQueryRateLimiter();
+const conversationRateLimiter = createConversationRateLimiter();
 
 // Error handling middleware
 const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) => {
@@ -232,7 +301,8 @@ interface QueryRequestBody {
   synthesisMode?: "synthesized" | "raw";
 }
 
-app.post("/query", asyncHandler(async (req: Request, res: Response) => {
+// Apply auth + rate limiting to query endpoint
+app.post("/query", authMiddleware, queryRateLimiter, asyncHandler(async (req: Request, res: Response) => {
   const body = req.body as QueryRequestBody;
   const startTime = Date.now();
 
@@ -287,8 +357,8 @@ app.post("/query", asyncHandler(async (req: Request, res: Response) => {
 // CONVERSATION ENDPOINTS
 // ============================================================================
 
-// Start a new conversation
-app.post("/conversation", asyncHandler(async (req: Request, res: Response) => {
+// Start a new conversation (auth + rate limiting)
+app.post("/conversation", authMiddleware, conversationRateLimiter, asyncHandler(async (req: Request, res: Response) => {
   const body = req.body as QueryRequestBody;
 
   if (!body.query || typeof body.query !== "string") {
@@ -318,7 +388,7 @@ interface ContinueConversationBody {
   answers: Record<string, string>;
 }
 
-app.post("/conversation/:id/continue", asyncHandler(async (req: Request, res: Response) => {
+app.post("/conversation/:id/continue", authMiddleware, conversationRateLimiter, asyncHandler(async (req: Request, res: Response) => {
   const conversationId = req.params.id;
   const body = req.body as ContinueConversationBody;
 
@@ -349,8 +419,8 @@ app.post("/conversation/:id/continue", asyncHandler(async (req: Request, res: Re
   res.json(response);
 }));
 
-// Abort a conversation
-app.delete("/conversation/:id", asyncHandler(async (req: Request, res: Response) => {
+// Abort a conversation (auth required)
+app.delete("/conversation/:id", authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const conversationId = req.params.id;
 
   if (!conversationId) {
@@ -417,7 +487,8 @@ interface FeedbackRequestBody {
   comment?: string;
 }
 
-app.post("/feedback", asyncHandler(async (req: Request, res: Response) => {
+// Feedback requires auth
+app.post("/feedback", authMiddleware, asyncHandler(async (req: Request, res: Response) => {
   const body = req.body as FeedbackRequestBody;
 
   if (!body.requestId || typeof body.requestId !== "string") {
@@ -511,8 +582,16 @@ interface UpdateWeightsBody {
 app.post("/admin/weights", asyncHandler(async (req: Request, res: Response) => {
   const body = req.body as UpdateWeightsBody;
 
-  // Simple token-based protection (should be improved for production)
-  const expectedToken = process.env.ADMIN_TOKEN ?? "ess-admin-change-me";
+  // Token-based protection - no weak default in production
+  const expectedToken = process.env.ADMIN_TOKEN;
+  if (!expectedToken) {
+    console.warn("[SECURITY] ADMIN_TOKEN not configured - admin endpoints disabled");
+    res.status(503).json({
+      error: "Admin endpoints disabled",
+      message: "ADMIN_TOKEN environment variable not configured",
+    });
+    return;
+  }
   if (body.verificationToken !== expectedToken) {
     res.status(403).json({
       error: "Unauthorized",
@@ -560,6 +639,210 @@ app.post("/admin/weights", asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // ============================================================================
+// PROMETHEUS METRICS ENDPOINT
+// ============================================================================
+
+app.get("/metrics", asyncHandler(async (_req: Request, res: Response) => {
+  const healthStatus = healthMonitor?.getHealthStatus() ?? [];
+  const circuitStats = circuitBreakers?.getAllStats() ?? {};
+
+  // Prometheus format metrics
+  let metrics = "";
+
+  // Health status metrics
+  metrics += "# HELP ess_health_status Service health status (1=healthy, 0=unhealthy)\n";
+  metrics += "# TYPE ess_health_status gauge\n";
+  for (const service of healthStatus) {
+    const value = service.status === "healthy" ? 1 : service.status === "degraded" ? 0.5 : 0;
+    metrics += `ess_health_status{service="${service.service}"} ${value}\n`;
+  }
+
+  // Latency metrics
+  metrics += "\n# HELP ess_service_latency_ms Service response latency in milliseconds\n";
+  metrics += "# TYPE ess_service_latency_ms gauge\n";
+  for (const service of healthStatus) {
+    if (service.latency >= 0) {
+      metrics += `ess_service_latency_ms{service="${service.service}"} ${service.latency}\n`;
+    }
+  }
+
+  // Consecutive failures
+  metrics += "\n# HELP ess_consecutive_failures Number of consecutive health check failures\n";
+  metrics += "# TYPE ess_consecutive_failures gauge\n";
+  for (const service of healthStatus) {
+    metrics += `ess_consecutive_failures{service="${service.service}"} ${service.consecutiveFailures}\n`;
+  }
+
+  // Circuit breaker metrics
+  metrics += "\n# HELP ess_circuit_state Circuit breaker state (0=closed, 0.5=half_open, 1=open)\n";
+  metrics += "# TYPE ess_circuit_state gauge\n";
+  for (const [name, stats] of Object.entries(circuitStats)) {
+    const value = stats.state === "open" ? 1 : stats.state === "half_open" ? 0.5 : 0;
+    metrics += `ess_circuit_state{circuit="${name}"} ${value}\n`;
+  }
+
+  metrics += "\n# HELP ess_circuit_total_opens Total times circuit has opened\n";
+  metrics += "# TYPE ess_circuit_total_opens counter\n";
+  for (const [name, stats] of Object.entries(circuitStats)) {
+    metrics += `ess_circuit_total_opens{circuit="${name}"} ${stats.totalOpens}\n`;
+  }
+
+  res.set("Content-Type", "text/plain; version=0.0.4");
+  res.send(metrics);
+}));
+
+// ============================================================================
+// MONITORING STATUS ENDPOINTS
+// ============================================================================
+
+// Get monitoring health status
+app.get("/monitoring/health", asyncHandler(async (_req: Request, res: Response) => {
+  if (!healthMonitor) {
+    res.status(503).json({
+      error: "Monitoring not initialized",
+      message: "Health monitoring is not yet available",
+    });
+    return;
+  }
+
+  const healthStatus = healthMonitor.getHealthStatus();
+  const circuitStats = circuitBreakers?.getAllStats() ?? {};
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    services: healthStatus,
+    circuits: circuitStats,
+    monitoring: {
+      enabled: true,
+      checkInterval: process.env.HEALTH_CHECK_INTERVAL ?? "30000",
+    },
+  });
+}));
+
+// Get alert history
+app.get("/monitoring/alerts", asyncHandler(async (req: Request, res: Response) => {
+  if (!alertManager) {
+    res.status(503).json({
+      error: "Alert manager not initialized",
+    });
+    return;
+  }
+
+  const limitParam = req.query.limit as string | undefined;
+  const limit = limitParam ? parseInt(limitParam, 10) : 50;
+
+  const alerts = alertManager.getHistory(limit);
+  const unacknowledged = alertManager.getUnacknowledged();
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    totalAlerts: alerts.length,
+    unacknowledgedCount: unacknowledged.length,
+    alerts,
+  });
+}));
+
+// Acknowledge an alert
+app.post("/monitoring/alerts/:id/acknowledge", authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+  if (!alertManager) {
+    res.status(503).json({
+      error: "Alert manager not initialized",
+    });
+    return;
+  }
+
+  const alertId = req.params.id;
+  if (!alertId) {
+    res.status(400).json({ error: "Missing alert ID" });
+    return;
+  }
+  const success = alertManager.acknowledge(alertId);
+
+  if (success) {
+    res.json({
+      status: "acknowledged",
+      alertId,
+      timestamp: new Date().toISOString(),
+    });
+  } else {
+    res.status(404).json({
+      error: "Alert not found",
+      alertId,
+    });
+  }
+}));
+
+// Get recovery history
+app.get("/monitoring/recovery", asyncHandler(async (req: Request, res: Response) => {
+  if (!recoveryEngine) {
+    res.status(503).json({
+      error: "Recovery engine not initialized",
+    });
+    return;
+  }
+
+  const service = req.query.service as string | undefined;
+  const history = recoveryEngine.getRecoveryHistory(service);
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    recoveryAttempts: history,
+  });
+}));
+
+// Get circuit breaker status
+app.get("/monitoring/circuits", asyncHandler(async (_req: Request, res: Response) => {
+  if (!circuitBreakers) {
+    res.status(503).json({
+      error: "Circuit breakers not initialized",
+    });
+    return;
+  }
+
+  const stats = circuitBreakers.getAllStats();
+  const summary = circuitBreakers.getSummary();
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    summary,
+    circuits: stats,
+  });
+}));
+
+// Reset a circuit breaker
+app.post("/monitoring/circuits/:name/reset", authMiddleware, asyncHandler(async (req: Request, res: Response) => {
+  if (!circuitBreakers) {
+    res.status(503).json({
+      error: "Circuit breakers not initialized",
+    });
+    return;
+  }
+
+  const name = req.params.name;
+  if (!name) {
+    res.status(400).json({ error: "Missing circuit name" });
+    return;
+  }
+  const breaker = circuitBreakers.has(name) ? circuitBreakers.get(name) : null;
+
+  if (!breaker) {
+    res.status(404).json({
+      error: "Circuit breaker not found",
+      name,
+    });
+    return;
+  }
+
+  breaker.reset();
+  res.json({
+    status: "reset",
+    circuit: name,
+    newState: breaker.getState(),
+    timestamp: new Date().toISOString(),
+  });
+}));
+
+// ============================================================================
 // ERROR HANDLER
 // ============================================================================
 
@@ -581,30 +864,90 @@ async function startServer(): Promise<void> {
   // Initialize agent
   agent = new EnggContextAgent(config);
 
+  // Initialize monitoring Redis connection
+  const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6380";
+  try {
+    monitoringRedis = new Redis(redisUrl);
+    monitoringRedis.on("error", (err) => {
+      console.warn("[Monitoring] Redis connection error:", err.message);
+    });
+    console.log("[Monitoring] Redis connected");
+  } catch (err) {
+    console.warn("[Monitoring] Redis connection failed, monitoring will run without persistence");
+  }
+
+  // Initialize circuit breakers
+  circuitBreakers = createESSCircuitBreakers();
+  console.log("[Monitoring] Circuit breakers initialized");
+
+  // Initialize alert manager
+  alertManager = createAlertManagerFromEnv();
+  console.log("[Monitoring] Alert manager initialized");
+
+  // Initialize recovery engine
+  recoveryEngine = createESSRecoveryEngine(
+    monitoringRedis ?? undefined,
+    alertManager,
+    process.env.DOCKER_COMPOSE_FILE ?? "/home/devuser/docker-compose.prod.yml"
+  );
+  console.log("[Monitoring] Recovery engine initialized");
+
+  // Initialize health monitor
+  const checkInterval = parseInt(process.env.HEALTH_CHECK_INTERVAL ?? "30000", 10);
+  healthMonitor = createESSHealthMonitor(monitoringRedis ?? undefined, checkInterval);
+
+  // Wire up monitoring callbacks
+  healthMonitor.setAlertCallback(async (services: MonitoringServiceHealth[]) => {
+    for (const service of services) {
+      const alert = alertManager.createAlert(service);
+      await alertManager.send(alert);
+    }
+  });
+
+  healthMonitor.setRecoveryCallback(async (services: MonitoringServiceHealth[]) => {
+    for (const service of services) {
+      const attempt = await recoveryEngine.evaluateAndRecover(service);
+      if (attempt) {
+        console.log(`[Recovery] ${service.service}: ${attempt.action} - ${attempt.success ? "SUCCESS" : "FAILED"}`);
+      }
+    }
+  });
+
+  // Start health monitoring
+  healthMonitor.start();
+  console.log(`[Monitoring] Health monitor started (interval: ${checkInterval}ms)`);
+
   app.listen(PORT, () => {
     console.log(`ESS Gateway running on port ${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/health`);
     console.log(`Query endpoint: POST http://localhost:${PORT}/query`);
     console.log(`Conversation: POST http://localhost:${PORT}/conversation`);
+    console.log(`Metrics: http://localhost:${PORT}/metrics`);
+    console.log(`Monitoring: http://localhost:${PORT}/monitoring/health`);
+    console.log(`Dashboard: http://localhost:${PORT}/dashboard`);
     console.log("");
     console.log("Configuration:");
     console.log(`  Qdrant: ${config.qdrant.url}`);
     console.log(`  Neo4j: ${config.neo4j.uri}`);
     console.log(`  Ollama: ${config.ollama?.url}`);
-    console.log(`  Redis: ${process.env.REDIS_URL ?? "redis://localhost:6380"}`);
+    console.log(`  Redis: ${redisUrl}`);
   });
 }
 
 // Graceful shutdown
 process.on("SIGTERM", async () => {
   console.log("SIGTERM received, shutting down...");
+  healthMonitor?.stop();
   await agent.close();
+  await monitoringRedis?.quit();
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
   console.log("SIGINT received, shutting down...");
+  healthMonitor?.stop();
   await agent.close();
+  await monitoringRedis?.quit();
   process.exit(0);
 });
 

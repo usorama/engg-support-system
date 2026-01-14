@@ -1,0 +1,16 @@
+{
+  "channels": ["log"],
+  "cooldown": 300000,
+  "maxHistory": 1000,
+  "email": {
+    "smtp": "smtp.gmail.com",
+    "port": 587,
+    "secure": false,
+    "from": "alerts@ess.ping-gadgets.com",
+    "to": []
+  },
+  "slack": {
+    "webhookUrl": "",
+    "username": "ESS Alert Bot"
+  }
+}
