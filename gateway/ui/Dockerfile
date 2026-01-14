@@ -6,6 +6,14 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# Build arguments for environment variables
+ARG VITE_ESS_API_KEY=""
+ARG VITE_API_BASE_URL=""
+
+# Set environment variables for Vite build
+ENV VITE_ESS_API_KEY=$VITE_ESS_API_KEY
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 # Copy package files
 COPY package*.json ./
 
@@ -15,7 +23,7 @@ RUN npm install
 # Copy source
 COPY . .
 
-# Build production bundle
+# Build production bundle (uses VITE_ env vars)
 RUN npm run build
 
 # Stage 2: Production
