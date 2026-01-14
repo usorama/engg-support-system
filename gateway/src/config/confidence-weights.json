@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "updatedAt": "2026-01-14T00:00:00Z",
+  "updatedBy": "initial",
+  "weights": {
+    "semanticScore": 0.7,
+    "structuralPresence": 0.1,
+    "citationCoverage": 0.2
+  },
+  "thresholds": {
+    "high": 0.8,
+    "medium": 0.5,
+    "low": 0.3
+  },
+  "behavior": {
+    "belowLow": "warn",
+    "belowMedium": "include_raw"
+  }
+}

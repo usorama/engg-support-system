@@ -414,7 +414,7 @@ Provide your answer with citations:`;
         stream: false,
         options: {
           temperature: options?.temperature ?? 0.3,
-          num_predict: options?.maxTokens ?? 2048,
+          num_predict: options?.maxTokens ?? 8192,
           seed: options?.seed ?? 42,
         },
       }),
@@ -458,7 +458,7 @@ Provide your answer with citations:`;
       },
       body: JSON.stringify({
         model: this.model,
-        max_tokens: options?.maxTokens ?? 2048,
+        max_tokens: options?.maxTokens ?? 8192,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -507,7 +507,7 @@ Provide your answer with citations:`;
       },
       body: JSON.stringify({
         model: this.model,
-        max_tokens: options?.maxTokens ?? 2048,
+        max_tokens: options?.maxTokens ?? 8192,
         system: systemPrompt,
         messages: [
           { role: "user", content: userPrompt },
@@ -683,13 +683,9 @@ Provide your answer with citations:`;
     semanticResult: SemanticResult,
     structuralResult: StructuralResult
   ): CombinedInsights {
-    // Extract summary (first paragraph or first 500 chars)
+    // Extract summary (first paragraph - no truncation for comprehensive answers)
     const paragraphs = answerText.split(/\n\n+/);
-    const firstParagraph = paragraphs[0] ?? answerText;
-    const summary =
-      firstParagraph.length > 500
-        ? firstParagraph.substring(0, 500) + "..."
-        : firstParagraph;
+    const summary = paragraphs[0] ?? answerText;
 
     // Extract key findings (bullet points or key statements)
     const keyFindings: string[] = [];

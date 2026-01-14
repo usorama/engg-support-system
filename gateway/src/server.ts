@@ -15,12 +15,14 @@ import express, { type Request, type Response, type NextFunction } from "express
 import cors from "cors";
 import { EnggContextAgent, type EnggContextAgentConfig } from "./agents/EnggContextAgent.js";
 import { conversationManager } from "./agents/ConversationManager.js";
+import { QueryMetricsStore, type FeedbackType } from "./metrics/QueryMetrics.js";
 import type {
   QueryRequest,
   QueryRequestWithMode,
   ConversationRequest,
   GatewayResponse,
 } from "./types/agent-contracts.js";
+import * as fs from "fs";
 
 // Environment configuration with defaults
 const qdrantConfig: EnggContextAgentConfig["qdrant"] = {
@@ -64,8 +66,27 @@ if (synthesisApiUrl && synthesisApiKey) {
   };
 }
 
-// Initialize agent
+// Initialize agent and metrics store
 let agent: EnggContextAgent;
+const metricsStore = new QueryMetricsStore(7); // 7-day TTL
+
+// Load confidence weights config
+function loadConfidenceWeights(): {
+  weights: { semanticScore: number; structuralPresence: number; citationCoverage: number };
+  thresholds: { high: number; medium: number; low: number };
+} {
+  try {
+    const configPath = new URL("./config/confidence-weights.json", import.meta.url);
+    const data = fs.readFileSync(configPath, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    // Return defaults if config not found
+    return {
+      weights: { semanticScore: 0.7, structuralPresence: 0.1, citationCoverage: 0.2 },
+      thresholds: { high: 0.8, medium: 0.5, low: 0.3 },
+    };
+  }
+}
 
 const app = express();
 app.use(cors());
@@ -213,6 +234,7 @@ interface QueryRequestBody {
 
 app.post("/query", asyncHandler(async (req: Request, res: Response) => {
   const body = req.body as QueryRequestBody;
+  const startTime = Date.now();
 
   if (!body.query || typeof body.query !== "string") {
     res.status(400).json({
@@ -233,6 +255,31 @@ app.post("/query", asyncHandler(async (req: Request, res: Response) => {
   };
 
   const response: GatewayResponse = await agent.query(request);
+
+  // Log metrics for confidence tuning (async, don't block response)
+  // Only log for QueryResponse (has results), not ConversationResponse
+  const latencyMs = Date.now() - startTime;
+  if ("results" in response) {
+    const queryResponse = response;
+    const matches = queryResponse.results?.semantic?.matches ?? [];
+    metricsStore.log({
+      requestId: request.requestId,
+      timestamp: request.timestamp,
+      query: request.query,
+      semanticMatchCount: matches.length,
+      structuralMatchCount: queryResponse.results?.structural?.relationships?.length ?? 0,
+      avgSemanticScore: matches.length > 0
+        ? matches.reduce((sum: number, m: { score: number }) => sum + m.score, 0) / matches.length
+        : 0,
+      confidence: queryResponse.answer?.confidence ?? 0,
+      answerLength: queryResponse.answer?.text?.length ?? 0,
+      citationCount: queryResponse.answer?.citations?.length ?? 0,
+      latencyMs,
+    }).catch(err => {
+      console.warn("[Metrics] Failed to log query metrics:", err);
+    });
+  }
+
   res.json(response);
 }));
 
@@ -358,6 +405,158 @@ app.get("/queue/stats", asyncHandler(async (_req: Request, res: Response) => {
     failed: 0,
     message: "Queue stats - LLM request queue not yet implemented",
   });
+}));
+
+// ============================================================================
+// FEEDBACK ENDPOINT
+// ============================================================================
+
+interface FeedbackRequestBody {
+  requestId: string;
+  feedback: FeedbackType;
+  comment?: string;
+}
+
+app.post("/feedback", asyncHandler(async (req: Request, res: Response) => {
+  const body = req.body as FeedbackRequestBody;
+
+  if (!body.requestId || typeof body.requestId !== "string") {
+    res.status(400).json({
+      error: "Missing required field: requestId",
+      message: "Request body must include a 'requestId' string field",
+    });
+    return;
+  }
+
+  if (!body.feedback || !["useful", "not_useful", "partial"].includes(body.feedback)) {
+    res.status(400).json({
+      error: "Invalid feedback value",
+      message: "Feedback must be one of: 'useful', 'not_useful', 'partial'",
+    });
+    return;
+  }
+
+  const success = await metricsStore.updateFeedback(
+    body.requestId,
+    body.feedback,
+    body.comment
+  );
+
+  if (!success) {
+    res.status(404).json({
+      error: "Request not found",
+      message: `No query found with requestId: ${body.requestId}`,
+    });
+    return;
+  }
+
+  res.json({
+    status: "recorded",
+    requestId: body.requestId,
+    feedback: body.feedback,
+    timestamp: new Date().toISOString(),
+  });
+}));
+
+// ============================================================================
+// ADMIN ENDPOINTS (Metrics & Weights)
+// ============================================================================
+
+// Get metrics summary
+app.get("/admin/metrics", asyncHandler(async (req: Request, res: Response) => {
+  const sinceParam = req.query.since as string | undefined;
+  let sinceDays = 7;
+
+  if (sinceParam) {
+    // Parse "Xh" for hours, "Xd" for days
+    const match = sinceParam.match(/^(\d+)([hd])$/);
+    if (match && match[1] && match[2]) {
+      const value = parseInt(match[1], 10);
+      const unit = match[2];
+      sinceDays = unit === "h" ? value / 24 : value;
+    }
+  }
+
+  const summary = await metricsStore.getSummary(sinceDays);
+  res.json(summary);
+}));
+
+// Get detailed metrics
+app.get("/admin/metrics/details", asyncHandler(async (req: Request, res: Response) => {
+  const limitParam = req.query.limit as string | undefined;
+  const limit = limitParam ? parseInt(limitParam, 10) : 100;
+
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const metrics = await metricsStore.getMetricsSince(since, limit);
+
+  res.json({
+    count: metrics.length,
+    metrics,
+  });
+}));
+
+// Get current confidence weights
+app.get("/admin/weights", asyncHandler(async (_req: Request, res: Response) => {
+  const config = loadConfidenceWeights();
+  res.json(config);
+}));
+
+// Update confidence weights (requires verification)
+interface UpdateWeightsBody {
+  weights?: { semanticScore?: number; structuralPresence?: number; citationCoverage?: number };
+  thresholds?: { high?: number; medium?: number; low?: number };
+  verificationToken?: string;
+}
+
+app.post("/admin/weights", asyncHandler(async (req: Request, res: Response) => {
+  const body = req.body as UpdateWeightsBody;
+
+  // Simple token-based protection (should be improved for production)
+  const expectedToken = process.env.ADMIN_TOKEN ?? "ess-admin-change-me";
+  if (body.verificationToken !== expectedToken) {
+    res.status(403).json({
+      error: "Unauthorized",
+      message: "Invalid or missing verificationToken",
+    });
+    return;
+  }
+
+  try {
+    const currentConfig = loadConfidenceWeights();
+
+    // Merge new values with current
+    const newConfig = {
+      version: (currentConfig as { version?: number }).version ?? 1,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "admin-api",
+      weights: {
+        ...currentConfig.weights,
+        ...body.weights,
+      },
+      thresholds: {
+        ...currentConfig.thresholds,
+        ...body.thresholds,
+      },
+      behavior: (currentConfig as { behavior?: unknown }).behavior ?? {
+        belowLow: "warn",
+        belowMedium: "include_raw",
+      },
+    };
+
+    // Write to config file
+    const configPath = new URL("./config/confidence-weights.json", import.meta.url);
+    fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2));
+
+    res.json({
+      status: "updated",
+      config: newConfig,
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to update weights",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
 }));
 
 // ============================================================================
