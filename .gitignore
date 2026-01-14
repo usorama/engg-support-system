@@ -75,11 +75,12 @@ env/
 ENV/
 .venv
 
-# Node
-package-lock.json
+# Node lock files (except gateway/ui for production builds)
 yarn.lock
 pnpm-lock.yaml
 .npm
+# Allow package-lock.json in gateway/ui for Docker builds
+!gateway/ui/package-lock.json
 
 # MCP
 *.mcp
