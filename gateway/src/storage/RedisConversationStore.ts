@@ -136,20 +136,28 @@ export class RedisConversationStore {
   async load(
     conversationId: string,
   ): Promise<ConversationState | null> {
+    console.log("[DEBUG] RedisConversationStore.load called for ID:", conversationId);
     const isAvailable = await this.checkRedisAvailable();
+    console.log("[DEBUG] Redis available:", isAvailable);
 
     if (isAvailable && this.redis) {
       try {
         const key = this.keyPrefix + conversationId;
+        console.log("[DEBUG] Looking up Redis key:", key);
         const data = await this.redis.get(key);
+        console.log("[DEBUG] Redis GET result:", data ? `found (${data.length} bytes)` : "null");
 
         if (!data) {
-          return null;
+          console.log("[DEBUG] Redis returned null - checking fallback");
+          return this.fallback.get(conversationId) ?? null;
         }
 
         try {
-          return JSON.parse(data) as ConversationState;
+          const parsed = JSON.parse(data) as ConversationState;
+          console.log("[DEBUG] Successfully parsed conversation state");
+          return parsed;
         } catch {
+          console.log("[DEBUG] JSON parse failed for data:", data.slice(0, 100));
           return null;
         }
       } catch (err) {
@@ -162,6 +170,7 @@ export class RedisConversationStore {
     }
 
     // Fallback to in-memory - return null if not found
+    console.log("[DEBUG] Using fallback map, has key:", this.fallback.has(conversationId));
     return this.fallback.get(conversationId) ?? null;
   }
 

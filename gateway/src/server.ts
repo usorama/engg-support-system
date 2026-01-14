@@ -359,6 +359,7 @@ app.post("/query", authMiddleware, queryRateLimiter, asyncHandler(async (req: Re
 
 // Start a new conversation (auth + rate limiting)
 app.post("/conversation", authMiddleware, conversationRateLimiter, asyncHandler(async (req: Request, res: Response) => {
+  console.log("[DEBUG] POST /conversation hit - starting NEW conversation");
   const body = req.body as QueryRequestBody;
 
   if (!body.query || typeof body.query !== "string") {
@@ -379,7 +380,9 @@ app.post("/conversation", authMiddleware, conversationRateLimiter, asyncHandler(
     ...(body.context !== undefined && { context: body.context }),
   };
 
+  console.log("[DEBUG] Calling agent.query() with:", JSON.stringify(request));
   const response: GatewayResponse = await agent.query(request);
+  console.log("[DEBUG] Response from agent.query():", JSON.stringify(response).slice(0, 500));
   res.json(response);
 }));
 
@@ -389,6 +392,10 @@ interface ContinueConversationBody {
 }
 
 app.post("/conversation/:id/continue", authMiddleware, conversationRateLimiter, asyncHandler(async (req: Request, res: Response) => {
+  console.log("[DEBUG] POST /conversation/:id/continue hit - CONTINUING conversation");
+  console.log("[DEBUG] URL params:", req.params);
+  console.log("[DEBUG] Full URL:", req.originalUrl);
+
   const conversationId = req.params.id;
   const body = req.body as ContinueConversationBody;
 
@@ -408,6 +415,9 @@ app.post("/conversation/:id/continue", authMiddleware, conversationRateLimiter, 
     return;
   }
 
+  console.log("[DEBUG] Conversation ID from URL:", conversationId);
+  console.log("[DEBUG] Answers:", JSON.stringify(body.answers));
+
   const request: ConversationRequest = {
     conversationId,
     answers: body.answers,
@@ -415,7 +425,9 @@ app.post("/conversation/:id/continue", authMiddleware, conversationRateLimiter, 
     timestamp: new Date().toISOString(),
   };
 
+  console.log("[DEBUG] Calling agent.continueConversation() with:", JSON.stringify(request));
   const response: GatewayResponse = await agent.continueConversation(request);
+  console.log("[DEBUG] Response from agent.continueConversation():", JSON.stringify(response).slice(0, 500));
   res.json(response);
 }));
 

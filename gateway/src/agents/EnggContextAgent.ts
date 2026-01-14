@@ -527,11 +527,16 @@ export class EnggContextAgent {
   async continueConversation(
     request: ConversationRequest,
   ): Promise<GatewayResponse> {
+    console.log("[DEBUG] EnggContextAgent.continueConversation called with:", JSON.stringify(request));
+
     // Get conversation state
     const conversationState =
       await conversationManager.getConversation(request.conversationId);
 
+    console.log("[DEBUG] conversationManager.getConversation returned:", conversationState ? JSON.stringify(conversationState).slice(0, 300) : "undefined");
+
     if (conversationState === undefined) {
+      console.log("[DEBUG] Conversation state is UNDEFINED - returning error response");
       // Invalid conversation ID - return error response
       return {
         requestId: request.requestId,

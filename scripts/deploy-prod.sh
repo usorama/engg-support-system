@@ -189,6 +189,8 @@ docker run -d \
     -e QDRANT_URL=http://ess-qdrant:6333 \
     -e QDRANT_COLLECTION="${QDRANT_COLLECTION:-ess_knowledge_base}" \
     -e REDIS_URL=redis://ess-redis:6379 \
+    -e REDIS_HOST=ess-redis \
+    -e REDIS_PORT=6379 \
     -e OLLAMA_URL="http://${DOCKER_HOST_IP}:11434" \
     -e EMBEDDING_MODEL="${EMBEDDING_MODEL:-nomic-embed-text}" \
     -e SYNTHESIS_MODEL="${SYNTHESIS_MODEL:-llama3.2}" \
