@@ -189,19 +189,14 @@ export class ConversationManager {
   async getConversation(
     conversationId: string,
   ): Promise<ConversationState | undefined> {
-    console.log("[DEBUG] ConversationManager.getConversation called for ID:", conversationId);
-
     // Check local cache first
     const cached = this.localCache.get(conversationId);
-    console.log("[DEBUG] Local cache lookup:", cached ? "FOUND" : "NOT FOUND");
     if (cached) {
       return cached;
     }
 
     // Fallback to Redis
-    console.log("[DEBUG] Falling back to Redis lookup...");
     const state = await this.redisStore.load(conversationId);
-    console.log("[DEBUG] Redis lookup result:", state ? "FOUND" : "NOT FOUND");
     if (state) {
       // Populate local cache
       this.localCache.set(conversationId, state);
