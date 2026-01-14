@@ -73,6 +73,12 @@ services:
       REDIS_URL: redis://redis:6379
       OLLAMA_URL: http://ollama:11434
       EMBEDDING_MODEL: nomic-embed-text
+      # Synthesis provider configuration (zAI/Anthropic API)
+      SYNTHESIS_PROVIDER: ${SYNTHESIS_PROVIDER:-ollama}
+      SYNTHESIS_API_URL: ${SYNTHESIS_API_URL:-}
+      SYNTHESIS_API_KEY: ${SYNTHESIS_API_KEY:-}
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-llama3.2}
+      SYNTHESIS_TIMEOUT: ${SYNTHESIS_TIMEOUT:-60000}
       # API authentication (required in production)
       ESS_API_KEY: ${ESS_API_KEY:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}

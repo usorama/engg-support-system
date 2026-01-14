@@ -305,6 +305,10 @@ export class EnggContextAgent {
       return null;
     }
 
+    // Add timeout to prevent hanging on slow/unresponsive Ollama
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
     try {
       const response = await fetch(`${this.ollamaUrl}/api/embeddings`, {
         method: "POST",
@@ -313,15 +317,32 @@ export class EnggContextAgent {
           model: this.ollamaModel,
           prompt: text,
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
+        console.error(
+          `[EnggContextAgent] Ollama embedding failed: ${response.status} ${response.statusText}`,
+        );
         return null;
       }
 
       const data = (await response.json()) as { embedding?: number[] };
       return data.embedding ?? null;
-    } catch {
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if ((error as Error).name === "AbortError") {
+        console.error(
+          "[EnggContextAgent] Ollama embedding timeout after 30s",
+        );
+      } else {
+        console.error(
+          "[EnggContextAgent] Embedding generation failed:",
+          error,
+        );
+      }
       return null;
     }
   }
