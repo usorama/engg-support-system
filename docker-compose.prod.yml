@@ -32,6 +32,26 @@ services:
       timeout: 10s
       retries: 3
 
+  # Chat UI (React PWA)
+  chat-ui:
+    build:
+      context: ./gateway/ui
+      dockerfile: Dockerfile
+    container_name: ess-chat-ui
+    restart: always
+    expose:
+      - "80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # HTTP Gateway (Internal - no external port exposure)
   gateway:
     build:
@@ -47,11 +67,15 @@ services:
       PORT: 3001
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: ${NEO4J_USER:-neo4j}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password123}
+      # SECURITY: NEO4J_PASSWORD must be set in .env.prod - no weak default
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:?NEO4J_PASSWORD is required in production}
       QDRANT_URL: http://qdrant:6333
       REDIS_URL: redis://redis:6379
       OLLAMA_URL: http://ollama:11434
       EMBEDDING_MODEL: nomic-embed-text
+      # API authentication (required in production)
+      ESS_API_KEY: ${ESS_API_KEY:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
     depends_on:
       neo4j:
         condition: service_healthy
@@ -76,7 +100,8 @@ services:
       - "7474"
       - "7687"
     environment:
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password123}
+      # SECURITY: Set NEO4J_PASSWORD in your .env.prod file
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
       NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_memory_heap_initial__size: 512m
       NEO4J_dbms_memory_heap_max__size: 1G
@@ -104,10 +129,12 @@ services:
     networks:
       - ess_network
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:6333/"]
+      # Use timeout with echo - checks if port is open (qdrant has no wget/curl)
+      test: ["CMD-SHELL", "timeout 2 bash -c 'echo > /dev/tcp/localhost/6333' 2>/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 30s
 
   # Redis (Queue + Cache)
   redis:
