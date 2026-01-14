@@ -1,0 +1,132 @@
+# ESS Alerting Rules
+# Critical alerts for production monitoring
+
+groups:
+  - name: ess-critical
+    rules:
+      # Gateway down
+      - alert: GatewayDown
+        expr: up{job="ess-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ESS Gateway is down"
+          description: "Gateway has been unreachable for more than 1 minute"
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(ess_http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(ess_http_requests_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is above 10% for the last 5 minutes"
+
+      # Query latency high
+      - alert: HighQueryLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(ess_query_duration_seconds_bucket[5m])) by (le)
+          ) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High query latency"
+          description: "95th percentile query latency is above 30 seconds"
+
+      # Circuit breaker open
+      - alert: CircuitBreakerOpen
+        expr: ess_circuit_breaker_state == 2
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker {{ $labels.name }} is open"
+          description: "Service {{ $labels.name }} circuit breaker has been open for 1 minute"
+
+      # Low confidence queries
+      - alert: LowQueryConfidence
+        expr: |
+          histogram_quantile(0.5,
+            sum(rate(ess_query_confidence_bucket[15m])) by (le)
+          ) < 0.3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low query confidence scores"
+          description: "Median query confidence has been below 30% for 15 minutes"
+
+  - name: ess-infrastructure
+    rules:
+      # Neo4j down
+      - alert: Neo4jDown
+        expr: ess_service_health{service="neo4j"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Neo4j database is down"
+          description: "Neo4j has been unreachable for more than 2 minutes"
+
+      # Qdrant down
+      - alert: QdrantDown
+        expr: ess_service_health{service="qdrant"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Qdrant vector database is down"
+          description: "Qdrant has been unreachable for more than 2 minutes"
+
+      # Redis down
+      - alert: RedisDown
+        expr: ess_service_health{service="redis"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis cache is down"
+          description: "Redis has been unreachable for more than 2 minutes"
+
+      # High rate limiting
+      - alert: HighRateLimiting
+        expr: sum(rate(ess_rate_limit_hits_total[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of rate-limited requests"
+          description: "More than 10 rate-limited requests per second for 5 minutes"
+
+  - name: ess-resources
+    rules:
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: |
+          process_resident_memory_bytes{job="ess-gateway"}
+          /
+          (1024 * 1024 * 1024) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Gateway memory usage"
+          description: "Gateway is using more than 1GB of memory"
+
+      # High CPU usage (Node.js)
+      - alert: HighCPUUsage
+        expr: |
+          rate(process_cpu_seconds_total{job="ess-gateway"}[5m]) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Gateway CPU usage"
+          description: "Gateway CPU usage is above 80% for 10 minutes"

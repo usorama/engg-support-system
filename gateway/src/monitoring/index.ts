@@ -40,3 +40,10 @@ export {
   type ContainerMapping,
   type RecoveryEngineConfig,
 } from "./RecoveryEngine.js";
+
+export {
+  metrics,
+  metricsHandler,
+  metricsMiddleware,
+  register,
+} from "./metrics.js";
