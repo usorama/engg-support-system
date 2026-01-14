@@ -16,6 +16,7 @@ import type {
   StructuralRelationship,
   CombinedInsights,
 } from "../types/agent-contracts.js";
+import { getSynthesisTimeout } from "../config/timeouts.js";
 
 // ============================================================================
 // Types
@@ -125,7 +126,7 @@ export class SynthesisAgent {
       this.provider = "ollama";
       this.baseUrl = config.ollamaUrl.replace(/\/$/, "");
       this.model = config.model ?? "llama3.2";
-      this.timeout = config.timeout ?? 30000;
+      this.timeout = config.timeout ?? getSynthesisTimeout();
       // apiKey not set for legacy Ollama config
     } else {
       this.provider = config.provider ?? "ollama";
@@ -138,7 +139,7 @@ export class SynthesisAgent {
       } else {
         this.model = "llama3.2";
       }
-      this.timeout = config.timeout ?? 30000;
+      this.timeout = config.timeout ?? getSynthesisTimeout();
       // Only set apiKey if defined
       if (config.apiKey !== undefined) {
         this.apiKey = config.apiKey;
@@ -757,6 +758,7 @@ export function createLocalSynthesisAgent(
   return new SynthesisAgent({
     provider: "ollama",
     baseUrl: `http://localhost:${ollamaPort}`,
+    timeout: getSynthesisTimeout(),
   });
 }
 
@@ -777,7 +779,7 @@ export function createVPSSynthesisAgent(): SynthesisAgent {
       baseUrl: apiUrl,
       apiKey,
       model: process.env.SYNTHESIS_MODEL || process.env.ANTHROPIC_MODEL || "glm-4.7",
-      timeout: 60000,
+      timeout: getSynthesisTimeout(),
     });
   }
 
@@ -785,7 +787,7 @@ export function createVPSSynthesisAgent(): SynthesisAgent {
   return new SynthesisAgent({
     provider: "ollama",
     baseUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
-    timeout: 60000,
+    timeout: getSynthesisTimeout(),
   });
 }
 
@@ -828,7 +830,7 @@ export function createSynthesisAgentFromEnv(): SynthesisAgent {
       baseUrl,
       apiKey,
       model: process.env.SYNTHESIS_MODEL || "glm-4.7",
-      timeout: process.env.SYNTHESIS_TIMEOUT ? parseInt(process.env.SYNTHESIS_TIMEOUT, 10) : 60000,
+      timeout: getSynthesisTimeout(),
     });
   }
 
@@ -847,7 +849,7 @@ export function createSynthesisAgentFromEnv(): SynthesisAgent {
       baseUrl,
       apiKey,
       model: process.env.SYNTHESIS_MODEL || process.env.ANTHROPIC_MODEL || "glm-4.7",
-      timeout: process.env.SYNTHESIS_TIMEOUT ? parseInt(process.env.SYNTHESIS_TIMEOUT, 10) : 60000,
+      timeout: getSynthesisTimeout(),
     });
   }
 
@@ -862,7 +864,7 @@ export function createSynthesisAgentFromEnv(): SynthesisAgent {
     provider: "ollama",
     baseUrl: ollamaUrl,
     model: process.env.OLLAMA_MODEL ?? "llama3.2",
-    timeout: process.env.OLLAMA_TIMEOUT ? parseInt(process.env.OLLAMA_TIMEOUT, 10) : 30000,
+    timeout: getSynthesisTimeout(),
   });
 }
 
@@ -879,6 +881,6 @@ export function createZAISynthesisAgent(
     baseUrl: "https://api.z.ai/api/anthropic/v1",
     apiKey,
     model: options?.model ?? "glm-4.7",
-    timeout: options?.timeout ?? 60000,
+    timeout: options?.timeout ?? getSynthesisTimeout(),
   });
 }

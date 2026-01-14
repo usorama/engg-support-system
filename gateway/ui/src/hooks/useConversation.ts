@@ -59,6 +59,28 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
+/**
+ * Generate a deduplication key for a message
+ * Used to prevent duplicate clarification messages from appearing
+ */
+function getMessageDedupeKey(msg: Partial<ChatMessage>): string | null {
+  // Only dedupe clarification and answer messages from assistant
+  if (msg.role !== "assistant") return null;
+
+  if (msg.type === "clarification" && msg.conversationId) {
+    // Dedupe clarifications by conversationId + content prefix
+    const contentPrefix = (msg.content ?? "").slice(0, 50);
+    return `clarification-${msg.conversationId}-${contentPrefix}`;
+  }
+
+  if (msg.type === "answer" && msg.requestId) {
+    // Dedupe answers by requestId
+    return `answer-${msg.requestId}`;
+  }
+
+  return null;
+}
+
 // Create initial conversation state
 function createInitialState(): ConversationState {
   return {
@@ -137,6 +159,7 @@ export function useConversation(
 
   /**
    * Process a gateway response
+   * Includes deduplication to prevent duplicate clarification messages
    */
   const processResponse = useCallback(
     (response: GatewayResponse, loadingMessageId: string) => {
@@ -152,12 +175,41 @@ export function useConversation(
           collectedAnswers: {},
         });
 
-        // Update loading message to clarification
-        updateMessage(loadingMessageId, {
-          type: "clarification",
+        // Create the update payload
+        const clarificationUpdate = {
+          type: "clarification" as const,
           content: response.clarifications.message,
           clarifications: response.clarifications,
           conversationId: response.conversationId,
+        };
+
+        // Check for duplicate clarification (defense in depth)
+        const dedupeKey = getMessageDedupeKey({
+          role: "assistant",
+          ...clarificationUpdate,
+        });
+
+        // Use setMessages to check for duplicates atomically
+        setMessages((prev) => {
+          // Check if this clarification already exists (by content + conversationId)
+          if (dedupeKey) {
+            const isDuplicate = prev.some((msg) => {
+              const existingKey = getMessageDedupeKey(msg);
+              return existingKey === dedupeKey;
+            });
+
+            if (isDuplicate) {
+              // Remove loading message and don't add duplicate
+              return prev.filter((msg) => msg.id !== loadingMessageId);
+            }
+          }
+
+          // Update loading message to clarification
+          return prev.map((msg) =>
+            msg.id === loadingMessageId
+              ? { ...msg, ...clarificationUpdate }
+              : msg
+          );
         });
       } else if (isQueryResponse(response)) {
         // This is a final answer

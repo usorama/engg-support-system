@@ -27,6 +27,7 @@ import { SynthesisAgent, type SynthesisAgentConfig } from "./SynthesisAgent.js";
 import { classifyQuery, type QueryClassification } from "./QueryClassifier.js";
 import { generateClarifications } from "./ClarificationGenerator.js";
 import { conversationManager } from "./ConversationManager.js";
+import { getSynthesisTimeout } from "../config/timeouts.js";
 
 export interface EnggContextAgentConfig {
   qdrant: {
@@ -120,6 +121,7 @@ export class EnggContextAgent {
         provider: "ollama",
         baseUrl: config.ollama.url,
         model: config.ollama.synthesisModel ?? "llama3.2",
+        timeout: getSynthesisTimeout(),
       });
     }
   }
@@ -562,17 +564,8 @@ export class EnggContextAgent {
       );
     }
 
-    // Check if max rounds reached
-    if (conversationState.round >= conversationState.maxRounds) {
-      // End conversation and execute query
-      await conversationManager.endConversation(request.conversationId);
-      return this.executeQueryWithCollectedContext(
-        request,
-        conversationState,
-      );
-    }
-
-    // Advance to next round
+    // FIX: Advance round FIRST, then check - prevents duplicate messages
+    // This ensures we check the NEW round, not the stale one
     const updatedState = await conversationManager.advanceRound(
       request.conversationId,
     );
@@ -601,22 +594,43 @@ export class EnggContextAgent {
       };
     }
 
-    if (updatedState.phase === "completed") {
-      // Max rounds reached, execute query
-      return this.executeQueryWithCollectedContext(
-        request,
-        conversationState,
-      );
+    // FIX: Check round AFTER advancing (not before)
+    // This prevents the off-by-one error causing duplicate clarifications
+    if (
+      updatedState.round > updatedState.maxRounds ||
+      updatedState.phase === "completed"
+    ) {
+      // Max rounds reached, execute query with collected context
+      await conversationManager.endConversation(request.conversationId);
+      return this.executeQueryWithCollectedContext(request, updatedState);
     }
 
-    // Still need more context - generate follow-up questions
-    const classification = classifyQuery(
-      conversationState.originalQuery,
-    );
+    // Still need more context - generate CONTEXT-AWARE follow-up questions
+    // FIX: Pass round and collectedContext to avoid asking same questions
+    const classification = classifyQuery(updatedState.originalQuery);
     const clarificationQuestions = generateClarifications(
-      conversationState.originalQuery,
+      updatedState.originalQuery,
       classification,
+      updatedState.round, // Pass current round
+      updatedState.collectedContext, // Pass collected answers
     );
+
+    // If no more questions to ask, execute the query
+    if (clarificationQuestions.length === 0) {
+      await conversationManager.endConversation(request.conversationId);
+      return this.executeQueryWithCollectedContext(request, updatedState);
+    }
+
+    // Generate round-aware message (not same message every time)
+    const roundMessages = [
+      "", // index 0 unused
+      "Thank you. I have a few questions to understand your needs better.",
+      "Thanks for that context. Just a couple more questions to narrow things down.",
+      "Almost there! One final question to ensure I give you the best answer.",
+    ];
+    const message =
+      roundMessages[Math.min(updatedState.round, roundMessages.length - 1)] ??
+      "Let me ask a follow-up question.";
 
     return {
       type: "conversation",
@@ -626,7 +640,7 @@ export class EnggContextAgent {
       phase: updatedState.phase,
       clarifications: {
         questions: clarificationQuestions,
-        message: "Thank you. I have a few more questions to understand your needs.",
+        message,
       },
       meta: {
         originalQuery: updatedState.originalQuery,

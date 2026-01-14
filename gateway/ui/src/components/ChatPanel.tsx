@@ -57,11 +57,22 @@ export function ChatPanel({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
+  // Uses requestAnimationFrame to ensure DOM is updated before scrolling
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages]);
+    // Use requestAnimationFrame to ensure DOM is ready
+    const rafId = requestAnimationFrame(() => {
+      const container = messagesContainerRef.current;
+      if (container) {
+        // Use scrollTop = scrollHeight for reliable scrolling
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: "smooth",
+        });
+      }
+    });
+
+    return () => cancelAnimationFrame(rafId);
+  }, [messages.length]); // Explicitly use length for dependency
 
   const handleClarificationSubmit = useCallback(
     (answers: Record<string, string>) => {
