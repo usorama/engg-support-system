@@ -25,6 +25,15 @@ mcp>=1.2.0
 # File System Watcher (STORY-019)
 watchdog>=4.0.0
 
+# Multi-language AST Parsing (STORY-020)
+tree-sitter==0.23.2
+tree-sitter-python==0.23.6
+tree-sitter-javascript==0.23.1
+tree-sitter-typescript==0.23.2
+tree-sitter-go==0.23.4
+tree-sitter-rust==0.23.2
+tree-sitter-java==0.23.4
+
 # Testing (see requirements-dev.txt for full dev dependencies)
 pytest==8.4.2
 requests>=2.31.0  # For test_observability.py health check tests

@@ -20,6 +20,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+# Tree-sitter parser for multi-language AST support (STORY-020)
+try:
+    from core.tree_sitter_parser import get_parser, parse_source_file, TREE_SITTER_AVAILABLE
+except ImportError:
+    TREE_SITTER_AVAILABLE = False
+    logger.warning("tree-sitter parser not available, using regex fallback")
+
 def get_file_hash(path: str) -> str:
     """Calculate SHA1 hash of a file for change detection (fast)."""
     hasher = hashlib.sha1()
@@ -448,12 +455,15 @@ class CodeGraphBuilder:
             ext = os.path.splitext(file_path)[1].lower()
 
             if ext == '.py':
-                # Python AST parsing
+                # Python AST parsing (standard library - most reliable)
                 tree = ast.parse(content)
                 visitor = CodeVisitor(self, file_path, file_uid)
                 visitor.visit(tree)
+            elif TREE_SITTER_AVAILABLE and self._use_tree_sitter(ext):
+                # Tree-sitter multi-language AST parsing (STORY-020)
+                self._parse_with_tree_sitter(content, file_path, file_uid, ext)
             else:
-                # Multi-language regex-based extraction for JS/TS/Go/Java/etc.
+                # Fallback: regex-based extraction for unsupported languages
                 self._parse_with_regex(content, file_path, file_uid, ext)
 
             self.hashes[rel_path] = current_hash
@@ -461,6 +471,125 @@ class CodeGraphBuilder:
         except Exception as e:
             logger.error(f"Failed to parse {file_path}: {e}")
             return False
+
+    def _use_tree_sitter(self, ext: str) -> bool:
+        """Check if tree-sitter should be used for this file extension."""
+        supported_extensions = {
+            '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',  # TypeScript/JavaScript
+            '.go',  # Go
+            '.rs',  # Rust
+            '.java',  # Java
+        }
+        return ext in supported_extensions
+
+    def _parse_with_tree_sitter(self, content: str, file_path: str, file_uid: str, ext: str):
+        """
+        Parse source file using tree-sitter for proper AST analysis.
+
+        STORY-020: Multi-language AST support
+
+        This provides deterministic parsing for TypeScript, JavaScript, Go, Rust, and Java.
+        Falls back to regex parsing if tree-sitter fails.
+        """
+        try:
+            result = parse_source_file(content, ext)
+
+            if not result.success:
+                logger.warning(f"Tree-sitter failed for {file_path}: {result.error}, falling back to regex")
+                self._parse_with_regex(content, file_path, file_uid, ext)
+                return
+
+            logger.debug(f"Tree-sitter parsed {file_path}: {len(result.functions)} functions, {len(result.classes)} classes")
+
+            # Process classes
+            for cls in result.classes:
+                qualified_name = f"{file_uid}.{cls.qualified_name}"
+                node_data = {
+                    "type": "Class",
+                    "name": cls.name,
+                    "qualified_name": qualified_name,
+                    "uid": qualified_name,
+                    "docstring": cls.docstring or "",
+                    "file_path": file_path,
+                    "start_line": cls.start_line,
+                    "embedding": None
+                }
+                self.nodes.append(node_data)
+
+                self.relationships.append({
+                    "start_id": file_uid,
+                    "end_id": qualified_name,
+                    "type": "DEFINES"
+                })
+
+                # Add inheritance relationships
+                for parent in cls.parent_classes:
+                    self.relationships.append({
+                        "start_id": qualified_name,
+                        "end_target": parent,
+                        "type": "EXTENDS"
+                    })
+
+                for interface in cls.interfaces:
+                    self.relationships.append({
+                        "start_id": qualified_name,
+                        "end_target": interface,
+                        "type": "IMPLEMENTS"
+                    })
+
+            # Process functions
+            for func in result.functions:
+                if func.is_method and func.parent_class:
+                    parent_id = f"{file_uid}.{func.parent_class}"
+                else:
+                    parent_id = file_uid
+
+                qualified_name = f"{file_uid}.{func.qualified_name}"
+                node_data = {
+                    "type": "Function",
+                    "name": func.name,
+                    "qualified_name": qualified_name,
+                    "uid": qualified_name,
+                    "docstring": func.docstring or "",
+                    "file_path": file_path,
+                    "start_line": func.start_line,
+                    "is_async": func.is_async,
+                    "embedding": None
+                }
+                self.nodes.append(node_data)
+
+                self.relationships.append({
+                    "start_id": parent_id,
+                    "end_id": qualified_name,
+                    "type": "DEFINES"
+                })
+
+            # Process imports
+            for imp in result.imports:
+                self.relationships.append({
+                    "start_id": file_uid,
+                    "end_target": imp.module,
+                    "type": "DEPENDS_ON"
+                })
+
+            # Process calls
+            for call in result.calls:
+                # Try to find the caller function based on line number
+                caller_id = file_uid
+                for func in result.functions:
+                    if func.start_line <= call.line <= func.end_line:
+                        caller_id = f"{file_uid}.{func.qualified_name}"
+                        break
+
+                self.relationships.append({
+                    "start_id": caller_id,
+                    "end_target": call.name,
+                    "type": "CALLS"
+                })
+
+        except Exception as e:
+            logger.warning(f"Tree-sitter parsing failed for {file_path}: {e}, falling back to regex")
+            self._parse_with_regex(content, file_path, file_uid, ext)
 
     def _parse_with_regex(self, content: str, file_path: str, file_uid: str, ext: str):
         """
