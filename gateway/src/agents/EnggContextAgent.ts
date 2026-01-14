@@ -601,11 +601,13 @@ export class EnggContextAgent {
 
     // FIX: Check round AFTER advancing (not before)
     // This prevents the off-by-one error causing duplicate clarifications
+    console.log("[DEBUG] After advanceRound - round:", updatedState.round, "maxRounds:", updatedState.maxRounds, "phase:", updatedState.phase);
     if (
       updatedState.round > updatedState.maxRounds ||
       updatedState.phase === "completed"
     ) {
       // Max rounds reached, execute query with collected context
+      console.log("[DEBUG] Max rounds reached or completed - executing query with collected context");
       await conversationManager.endConversation(request.conversationId);
       return this.executeQueryWithCollectedContext(request, updatedState);
     }
@@ -613,6 +615,8 @@ export class EnggContextAgent {
     // Still need more context - generate CONTEXT-AWARE follow-up questions
     // FIX: Pass round and collectedContext to avoid asking same questions
     const classification = classifyQuery(updatedState.originalQuery);
+    console.log("[DEBUG] Classification for originalQuery:", JSON.stringify(classification));
+
     const clarificationQuestions = generateClarifications(
       updatedState.originalQuery,
       classification,
@@ -620,8 +624,11 @@ export class EnggContextAgent {
       updatedState.collectedContext, // Pass collected answers
     );
 
+    console.log("[DEBUG] Generated", clarificationQuestions.length, "clarification questions for round", updatedState.round);
+
     // If no more questions to ask, execute the query
     if (clarificationQuestions.length === 0) {
+      console.log("[DEBUG] No clarification questions - executing query with collected context");
       await conversationManager.endConversation(request.conversationId);
       return this.executeQueryWithCollectedContext(request, updatedState);
     }
@@ -669,11 +676,17 @@ export class EnggContextAgent {
       conversationState.collectedContext,
     );
 
+    console.log("[DEBUG] executeQueryWithCollectedContext - executing ONE-SHOT query");
+
     // Execute query with enriched context
+    // CRITICAL: Use mode "one-shot" to prevent starting a new conversation!
+    // Without this, the classifier might suggest conversational mode again
+    // and create a new conversation instead of returning results.
     return this.query({
       query: enrichedQuery,
       requestId: request.requestId,
       timestamp: request.timestamp,
+      mode: "one-shot", // Force one-shot mode to prevent new conversation
       context: Object.values(conversationState.collectedContext).map(String),
     }) as Promise<QueryResponse>;
   }
