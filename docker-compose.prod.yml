@@ -139,6 +139,9 @@ services:
     image: qdrant/qdrant:v1.7.4
     container_name: ess-qdrant
     restart: always
+    ports:
+      - "6335:6333"  # Qdrant HTTP (6335 to avoid conflict with engg-qdrant)
+      - "6336:6334"  # Qdrant gRPC
     expose:
       - "6333"
       - "6334"
@@ -177,6 +180,8 @@ services:
     image: ollama/ollama:latest
     container_name: ess-ollama
     restart: always
+    ports:
+      - "11435:11434"  # Ollama API (11435 to avoid conflict with kb-ollama)
     expose:
       - "11434"
     volumes:
