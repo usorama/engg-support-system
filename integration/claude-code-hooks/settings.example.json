@@ -1,0 +1,37 @@
+{
+  "$schema": "https://claude.ai/code/settings-schema.json",
+  "mcpServers": {
+    "ess-veracity": {
+      "command": "python3",
+      "args": ["/Users/umasankr/Projects/engg-support-system/veracity-engine/core/mcp_server.py"],
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "your-password"
+      }
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "command": "python3 /Users/umasankr/Projects/engg-support-system/integration/claude-code-hooks/ess-session-context.py"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "python3 /Users/umasankr/Projects/engg-support-system/integration/claude-code-hooks/ess-file-context.py"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "command": "python3 /Users/umasankr/Projects/engg-support-system/integration/claude-code-hooks/ess-commit-tracker.py"
+      }
+    ]
+  },
+  "env": {
+    "ESS_URL": "http://localhost:8000",
+    "ESS_PROJECT": ""
+  }
+}

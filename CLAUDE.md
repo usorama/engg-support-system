@@ -504,6 +504,81 @@ See `docs/plans/INTEGRATION_PLAN.md` for the complete integration plan including
 
 ---
 
+## Project Integration (How Other Projects Use ESS)
+
+ESS provides MCP tools for AI agents in other projects to track dev context.
+
+### For Claude Code Agents in Other Projects
+
+1. **Add MCP Server** to project's `.mcp.json` or `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "ess-veracity": {
+      "command": "python3",
+      "args": ["/path/to/engg-support-system/veracity-engine/core/mcp_server.py"],
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_PASSWORD": "your-password"
+      }
+    }
+  }
+}
+```
+
+2. **Register the project** (first time only):
+```
+register_project(project_name="myproject", root_dir="/path/to/project")
+index_project(project_name="myproject")
+```
+
+3. **Use MCP tools** for work tracking:
+
+| Tool | Purpose |
+|------|---------|
+| `query_codebase` | Query knowledge graph for code evidence |
+| `create_work_item` | Create new work item (feature, bug, task) |
+| `query_work_items` | List work items with filters |
+| `trace_file_to_work` | Find work items related to a file |
+| `update_work_item` | Update status, priority, assignees |
+| `analyze_code_for_work` | Auto-detect TODOs/FIXMEs |
+
+### Integration Documentation
+
+See `integration/` directory for:
+- `CLAUDE_MD_INTEGRATION.md` - Template for other project CLAUDE.md files
+- `claude-code-plugin/.mcp.json` - Ready-to-use MCP configuration
+- `register-project.sh` - Convenience script for initial setup
+
+### Key MCP Tools (Full Reference)
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                    ESS MCP TOOLS REFERENCE                      │
+├────────────────────────────────────────────────────────────────┤
+│  QUERY & UNDERSTAND                                             │
+│  query_codebase         → Search code structure & relationships │
+│  query_work_items       → List work items with filters          │
+│  get_work_context       → Full context for a work item          │
+│  trace_file_to_work     → What work items touched this file?    │
+│                                                                 │
+│  CREATE & UPDATE                                                │
+│  create_work_item       → Create feature/bug/task               │
+│  update_work_item       → Update status/priority/assignees      │
+│  record_code_change     → Record git commit (usually auto)      │
+│  link_code_to_work      → Link commit to work item              │
+│                                                                 │
+│  ANALYZE & SETUP                                                │
+│  analyze_code_for_work  → Detect TODOs/FIXMEs → work items      │
+│  register_project       → Register new project                  │
+│  index_project          → Index/re-index codebase               │
+│  list_projects          → List all indexed projects             │
+└────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## VPS Deployment
 
 ### knowledge-base
@@ -519,7 +594,13 @@ cd veracity-engine/infra
 docker compose up -d
 ```
 
+### Full Stack (with Dev Context Tracking)
+```bash
+# Deploy all services including veracity-engine + UI
+./scripts/deploy-prod.sh
+```
+
 ---
 
-**Document Status**: Unified | **Last Updated**: 2026-01-07
+**Document Status**: Unified | **Last Updated**: 2026-01-15
 **See Also**: `docs/plans/INTEGRATION_PLAN.md` (comprehensive integration roadmap)

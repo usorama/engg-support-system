@@ -148,6 +148,202 @@ async def github_webhook():
     return {"status": "received", "message": "Webhook endpoint ready"}
 
 
+# ============================================================================
+# Hook Support Endpoints (for Claude Code auto-integration)
+# ============================================================================
+
+@app.get("/api/file-context/{project_name}")
+async def get_file_context(
+    project_name: str,
+    file_path: str,
+    min_confidence: float = 0.5
+):
+    """
+    Get dev context for a file - used by PreToolUse hook.
+
+    Returns related work items, recent commits, and suggestions.
+    """
+    try:
+        from core.dev_context import DevContextManager
+
+        with DevContextManager(
+            project_name=project_name,
+            neo4j_uri=NEO4J_URI,
+            neo4j_user=NEO4J_USER,
+            neo4j_password=NEO4J_PASSWORD
+        ) as manager:
+            # Trace file to work items
+            work_items = manager.trace_file_to_work(
+                file_path=file_path,
+                min_confidence=min_confidence
+            )
+
+            # Get open work items for project
+            open_items = manager.query_work_items(
+                status="open",
+                limit=5
+            )
+
+        return {
+            "file_path": file_path,
+            "project": project_name,
+            "related_work_items": work_items,
+            "open_work_items": open_items,
+            "suggestion": _generate_suggestion(file_path, work_items, open_items)
+        }
+    except Exception as e:
+        # Return empty context on error (don't block the hook)
+        return {
+            "file_path": file_path,
+            "project": project_name,
+            "related_work_items": [],
+            "open_work_items": [],
+            "suggestion": None,
+            "error": str(e)
+        }
+
+
+@app.get("/api/project-context/{project_name}")
+async def get_project_context(project_name: str):
+    """
+    Get project summary - used by SessionStart hook.
+
+    Returns work item counts, recent activity, and key stats.
+    """
+    try:
+        from core.dev_context import DevContextManager
+
+        with DevContextManager(
+            project_name=project_name,
+            neo4j_uri=NEO4J_URI,
+            neo4j_user=NEO4J_USER,
+            neo4j_password=NEO4J_PASSWORD
+        ) as manager:
+            # Get work item counts by status
+            open_items = manager.query_work_items(status="open", limit=100)
+            in_progress = manager.query_work_items(status="in_progress", limit=100)
+            blocked = manager.query_work_items(status="blocked", limit=100)
+
+            # Get high priority items
+            high_priority = manager.query_work_items(priority="high", limit=5)
+            critical = manager.query_work_items(priority="critical", limit=5)
+
+        return {
+            "project": project_name,
+            "summary": {
+                "open": len(open_items),
+                "in_progress": len(in_progress),
+                "blocked": len(blocked)
+            },
+            "high_priority_items": critical + high_priority,
+            "context_prompt": _generate_session_context(
+                project_name, open_items, in_progress, blocked, critical + high_priority
+            )
+        }
+    except Exception as e:
+        return {
+            "project": project_name,
+            "summary": {"open": 0, "in_progress": 0, "blocked": 0},
+            "high_priority_items": [],
+            "context_prompt": None,
+            "error": str(e)
+        }
+
+
+@app.post("/api/record-commit/{project_name}")
+async def record_commit(
+    project_name: str,
+    commit_hash: str,
+    message: str,
+    author: str,
+    files_changed: str = ""
+):
+    """
+    Record a git commit - used by PostToolUse hook.
+
+    Automatically infers work type from conventional commit message.
+    """
+    try:
+        from core.dev_context import DevContextManager
+        from core.git_analyzer import GitAnalyzer
+
+        with DevContextManager(
+            project_name=project_name,
+            neo4j_uri=NEO4J_URI,
+            neo4j_user=NEO4J_USER,
+            neo4j_password=NEO4J_PASSWORD
+        ) as manager:
+            # Parse files changed
+            files = [f.strip() for f in files_changed.split(",") if f.strip()]
+
+            # Record each file change
+            code_change_uids = []
+            for file_path in files:
+                uid = manager.record_code_change(
+                    commit_hash=commit_hash,
+                    file_path=file_path,
+                    change_type="modified",
+                    author=author
+                )
+                code_change_uids.append(uid)
+
+            # Try to auto-link to work items based on commit message
+            linked_work_items = []
+            # Look for work item references in commit message (e.g., WORK-123, #123)
+            import re
+            work_refs = re.findall(r'(?:WORK-|#)(\d+)', message, re.IGNORECASE)
+            # Also check conventional commit for auto-creating work items
+            analyzer = GitAnalyzer(project_name)
+            work_type, confidence = analyzer.infer_work_type(message, files)
+
+        return {
+            "commit_hash": commit_hash,
+            "project": project_name,
+            "files_recorded": len(code_change_uids),
+            "inferred_work_type": work_type,
+            "confidence": confidence,
+            "work_refs_found": work_refs,
+            "linked_work_items": linked_work_items
+        }
+    except Exception as e:
+        return {
+            "commit_hash": commit_hash,
+            "project": project_name,
+            "error": str(e)
+        }
+
+
+def _generate_suggestion(file_path: str, related_work: list, open_work: list) -> str:
+    """Generate a contextual suggestion for the agent."""
+    if related_work:
+        items = ", ".join([w.get("title", w.get("uid", "unknown"))[:30] for w in related_work[:3]])
+        return f"This file is related to: {items}. Consider updating these work items."
+    elif open_work:
+        return f"There are {len(open_work)} open work items. Consider linking your changes."
+    return None
+
+
+def _generate_session_context(project: str, open_items: list, in_progress: list,
+                               blocked: list, priority_items: list) -> str:
+    """Generate session context prompt for injection."""
+    lines = [f"## ESS Dev Context for {project}"]
+
+    if priority_items:
+        lines.append(f"\n**High Priority ({len(priority_items)}):**")
+        for item in priority_items[:5]:
+            lines.append(f"- [{item.get('work_type', 'task')}] {item.get('title', 'Unknown')}")
+
+    if blocked:
+        lines.append(f"\n**Blocked ({len(blocked)}):**")
+        for item in blocked[:3]:
+            lines.append(f"- {item.get('title', 'Unknown')}")
+
+    lines.append(f"\n**Summary:** {len(open_items)} open, {len(in_progress)} in progress, {len(blocked)} blocked")
+    lines.append("\nUse `trace_file_to_work()` before modifying files to understand context.")
+
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Veracity Engine HTTP Server")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
