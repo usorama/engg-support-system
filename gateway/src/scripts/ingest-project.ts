@@ -35,11 +35,19 @@ interface QdrantPoint {
   id: string;
   vector: number[];
   payload: {
+    // IngestPayload fields (primary)
     content: string;
     filePath: string;
     project: string;
     nodeType: string;
     createdAt: string;
+    // VeracityPayload-compatible fields (for dual-schema support)
+    uid: string;
+    name: string;
+    qualified_name: string;
+    docstring: string;
+    path: string;
+    labels: string[];
   };
 }
 
@@ -315,15 +323,29 @@ async function ingestProject(
         const chunk = chunks[chunkIdx]!;
         const embedding = await generateEmbedding(chunk);
 
+        const pointId = randomUUID();
+        const fileName = relativePath.split('/').pop() || relativePath;
+        const labels = nodeType === "MARKDOWN" || nodeType === "DOCUMENT"
+          ? ["Document", "Doc"]
+          : ["Code", nodeType === "CODE" ? "Function" : "File"];
+
         points.push({
-          id: randomUUID(),
+          id: pointId,
           vector: embedding,
           payload: {
+            // IngestPayload fields (primary)
             content: chunk,
             filePath: relativePath,
             project: projectName,
             nodeType,
             createdAt: new Date().toISOString(),
+            // VeracityPayload-compatible fields (for dual-schema support)
+            uid: pointId,
+            name: fileName,
+            qualified_name: `${projectName}/${relativePath}`,
+            docstring: chunk,
+            path: relativePath,
+            labels,
           },
         });
       }
