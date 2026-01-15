@@ -111,6 +111,9 @@ services:
     image: neo4j:5.15.0
     container_name: ess-neo4j
     restart: always
+    ports:
+      - "7474:7474"  # Neo4j Browser
+      - "7687:7687"  # Bolt protocol
     expose:
       - "7474"
       - "7687"
