@@ -655,6 +655,56 @@ Returns list of work items with trace metadata.""",
             },
             "required": ["file_path", "project_name"]
         }
+    ),
+    Tool(
+        name="update_work_item",
+        description="""Update work item metadata (status, priority, assignees, labels).
+
+Allows modification of work item fields without recreating the item.
+Supports partial updates - only provided fields will be modified.
+
+Fields that can be updated:
+- status: open, in_progress, closed, blocked
+- priority: critical, high, medium, low
+- assignees: List of assignee identifiers
+- labels: List of label strings
+- closure_reason: Reason for closing (when status=closed)
+
+Returns updated work item details.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "work_item_uid": {
+                    "type": "string",
+                    "description": "WorkItem UID to update"
+                },
+                "status": {
+                    "type": "string",
+                    "description": "New status value",
+                    "enum": ["open", "in_progress", "closed", "blocked"]
+                },
+                "priority": {
+                    "type": "string",
+                    "description": "New priority value",
+                    "enum": ["critical", "high", "medium", "low"]
+                },
+                "assignees": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of assignee identifiers"
+                },
+                "labels": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of labels"
+                },
+                "closure_reason": {
+                    "type": "string",
+                    "description": "Reason for closing (when status=closed)"
+                }
+            },
+            "required": ["work_item_uid"]
+        }
     )
 ]
 
@@ -711,6 +761,8 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
             return await handle_get_work_context(arguments)
         elif name == "trace_file_to_work":
             return await handle_trace_file_to_work(arguments)
+        elif name == "update_work_item":
+            return await handle_update_work_item(arguments)
         else:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Unknown tool: {name}")],
@@ -1912,6 +1964,117 @@ async def handle_trace_file_to_work(args: dict) -> CallToolResult:
 
     except Exception as e:
         logger.error(f"Failed to trace file to work: {e}", exc_info=True)
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+
+
+async def handle_update_work_item(args: dict) -> CallToolResult:
+    """Update work item metadata (status, priority, assignees, labels)."""
+    # Extract required field
+    work_item_uid = args.get("work_item_uid")
+
+    if not work_item_uid:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": "Missing required field: work_item_uid"
+                })
+            )],
+            isError=True
+        )
+
+    # Extract optional fields
+    status = args.get("status")
+    priority = args.get("priority")
+    assignees = args.get("assignees")
+    labels = args.get("labels")
+    closure_reason = args.get("closure_reason")
+
+    try:
+        # Extract project from UID
+        project_name = work_item_uid.split("::")[0]
+        manager = get_dev_context_manager(project_name)
+
+        # Build kwargs for only provided fields
+        update_kwargs = {"work_item_uid": work_item_uid}
+        if status is not None:
+            update_kwargs["status"] = status
+        if priority is not None:
+            update_kwargs["priority"] = priority
+        if assignees is not None:
+            update_kwargs["assignees"] = assignees
+        if labels is not None:
+            update_kwargs["labels"] = labels
+        if closure_reason is not None:
+            update_kwargs["closure_reason"] = closure_reason
+
+        # Update the work item
+        success = manager.update_work_item(**update_kwargs)
+
+        if not success:
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=json.dumps({
+                        "success": False,
+                        "error": "Failed to update work item"
+                    })
+                )],
+                isError=True
+            )
+
+        # Retrieve the updated work item
+        updated_work_item = manager.get_work_item(work_item_uid)
+
+        logger.info(f"Updated work item: {work_item_uid}")
+
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": True,
+                    "data": updated_work_item
+                })
+            )]
+        )
+
+    except WorkItemNotFoundError as e:
+        logger.error(f"Work item not found: {e}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+    except ValueError as e:
+        # Handle InvalidUIIDFormatError (which is a ValueError subclass)
+        logger.error(f"Validation error updating work item: {e}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+    except Exception as e:
+        logger.error(f"Failed to update work item: {e}", exc_info=True)
         return CallToolResult(
             content=[TextContent(
                 type="text",

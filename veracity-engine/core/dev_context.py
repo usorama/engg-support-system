@@ -352,6 +352,105 @@ class DevContextManager:
 
             return dict(record["w"])
 
+    def update_work_item(self, work_item_uid: str,
+                        status: Optional[str] = None,
+                        priority: Optional[str] = None,
+                        assignees: Optional[List[str]] = None,
+                        labels: Optional[List[str]] = None,
+                        closure_reason: Optional[str] = None,
+                        changed_by: str = "system") -> bool:
+        """
+        Update WorkItem node properties.
+
+        Args:
+            work_item_uid: WorkItem UID to update
+            status: New status value (optional)
+            priority: New priority value (optional)
+            assignees: List of assignee identifiers (optional)
+            labels: List of labels/tags (optional)
+            closure_reason: Reason for closure if status is closed (optional)
+            changed_by: Actor who made the change (default: "system")
+
+        Returns:
+            True if update successful, False otherwise
+
+        Raises:
+            InvalidUIIDFormatError: If UID format is invalid
+            WorkItemNotFoundError: If work item not found
+        """
+        # Validate UID format
+        self._validate_uid(work_item_uid)
+
+        # Get current work item to compare for audit events
+        try:
+            current_item = self.get_work_item(work_item_uid)
+        except WorkItemNotFoundError:
+            raise
+
+        # Build SET clauses dynamically for provided fields
+        set_clauses = ["w.updated_at = $updated_at"]
+        params = {
+            "uid": work_item_uid,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        if status is not None:
+            set_clauses.append("w.status = $status")
+            params["status"] = status
+
+        if priority is not None:
+            set_clauses.append("w.priority = $priority")
+            params["priority"] = priority
+
+        if assignees is not None:
+            set_clauses.append("w.assignees = $assignees")
+            params["assignees"] = assignees
+
+        if labels is not None:
+            set_clauses.append("w.labels = $labels")
+            params["labels"] = labels
+
+        if closure_reason is not None:
+            set_clauses.append("w.closure_reason = $closure_reason")
+            params["closure_reason"] = closure_reason
+
+        # Build and execute update query
+        set_clause = ", ".join(set_clauses)
+        query = f"""
+        MATCH (w:WorkItem {{uid: $uid}})
+        SET {set_clause}
+        RETURN w
+        """
+
+        with self._driver.session() as session:
+            result = session.run(query, params)
+            record = result.single()
+
+            if not record:
+                return False
+
+            # Create audit event for status changes
+            if status is not None and current_item.get("status") != status:
+                self._create_audit_event(
+                    work_item_uid=work_item_uid,
+                    event_type="status_changed",
+                    old_value=current_item.get("status"),
+                    new_value=status,
+                    changed_by=changed_by
+                )
+
+            # Create audit event for priority changes
+            if priority is not None and current_item.get("priority") != priority:
+                self._create_audit_event(
+                    work_item_uid=work_item_uid,
+                    event_type="priority_changed",
+                    old_value=current_item.get("priority"),
+                    new_value=priority,
+                    changed_by=changed_by
+                )
+
+            return True
+
     def _create_audit_event(self, work_item_uid: str, event_type: str,
                            old_value: Optional[str], new_value: Optional[str],
                            changed_by: str) -> str:

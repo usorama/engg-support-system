@@ -308,6 +308,140 @@ class TestLinkCodeToWorkTool:
         assert call_kwargs["link_confidence"] == 0.5  # Default value
 
 
+class TestUpdateWorkItemTool:
+    """Test the update_work_item MCP tool"""
+
+    @pytest.fixture
+    def mock_dev_context(self):
+        """Mock DevContextManager for testing"""
+        mock_manager = Mock()
+        mock_manager.update_work_item.return_value = True
+        mock_manager._validate_uid.return_value = True
+        mock_manager.get_work_item.return_value = {
+            "uid": "test-project::workitem::abc123",
+            "title": "Test work item",
+            "status": "in_progress",
+            "priority": "high",
+            "assignees": ["alice@example.com"],
+            "labels": ["urgent"],
+            "updated_at": "2026-01-15T19:00:00Z"
+        }
+        mock_manager._driver = Mock()
+        return mock_manager
+
+    @pytest.fixture
+    def mcp_request(self):
+        """Sample MCP request for update_work_item"""
+        return {
+            "work_item_uid": "test-project::workitem::abc123",
+            "status": "in_progress",
+            "priority": "high",
+            "assignees": ["alice@example.com", "bob@example.com"],
+            "labels": ["urgent", "backend"]
+        }
+
+    @pytest.mark.anyio
+    async def test_update_work_item_basic(self, mock_dev_context, mcp_request):
+        """Test basic work item updating via MCP"""
+        # Mock session for audit event creation
+        mock_session = Mock()
+        mock_session.run.return_value = Mock()
+        mock_session.__enter__ = Mock(return_value=mock_session)
+        mock_session.__exit__ = Mock(return_value=False)
+        mock_dev_context._driver.session.return_value = mock_session
+
+        with patch('mcp_server.get_dev_context_manager', return_value=mock_dev_context):
+            # This will fail because handle_update_work_item doesn't exist yet
+            from mcp_server import handle_update_work_item
+            response = await handle_update_work_item(mcp_request)
+
+        response_data = json.loads(response.content[0].text)
+        assert response_data["success"] is True
+        assert "uid" in response_data["data"]
+        assert response_data["data"]["uid"] == "test-project::workitem::abc123"
+        assert "status" in response_data["data"]
+        mock_dev_context.update_work_item.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_update_work_item_with_audit_event(self, mock_dev_context):
+        """Test that audit events are created for status changes"""
+        request = {
+            "work_item_uid": "test-project::workitem::abc123",
+            "status": "closed",
+            "closure_reason": "Completed successfully"
+        }
+
+        with patch('mcp_server.get_dev_context_manager', return_value=mock_dev_context):
+            from mcp_server import handle_update_work_item
+            response = await handle_update_work_item(request)
+
+        response_data = json.loads(response.content[0].text)
+        assert response_data["success"] is True
+
+        # Verify audit event creation was called
+        call_kwargs = mock_dev_context.update_work_item.call_args[1]
+        assert "closure_reason" in call_kwargs
+
+    @pytest.mark.anyio
+    async def test_update_work_item_invalid_uid(self, mock_dev_context):
+        """Test error handling for invalid work item UID"""
+        request = {
+            "work_item_uid": "invalid-uid-format",
+            "status": "closed"
+        }
+
+        # Make update_work_item raise the exception
+        from core.dev_context import InvalidUIIDFormatError
+        mock_dev_context.update_work_item.side_effect = InvalidUIIDFormatError("Invalid UID format")
+
+        with patch('mcp_server.get_dev_context_manager', return_value=mock_dev_context):
+            from mcp_server import handle_update_work_item
+            response = await handle_update_work_item(request)
+
+        response_data = json.loads(response.content[0].text)
+        assert response_data["success"] is False
+        assert "error" in response_data
+        assert "uid" in response_data["error"].lower()
+
+    @pytest.mark.anyio
+    async def test_update_work_item_missing_uid(self, mock_dev_context):
+        """Test error handling for missing work_item_uid"""
+        request = {
+            "status": "closed"
+            # Missing work_item_uid
+        }
+
+        with patch('mcp_server.get_dev_context_manager', return_value=mock_dev_context):
+            from mcp_server import handle_update_work_item
+            response = await handle_update_work_item(request)
+
+        response_data = json.loads(response.content[0].text)
+        assert response_data["success"] is False
+        assert "error" in response_data
+        assert "work_item_uid" in response_data["error"].lower()
+
+    @pytest.mark.anyio
+    async def test_update_work_item_partial_updates(self, mock_dev_context):
+        """Test updating only specific fields"""
+        request = {
+            "work_item_uid": "test-project::workitem::abc123",
+            "priority": "low"
+            # Only updating priority, not status or other fields
+        }
+
+        with patch('mcp_server.get_dev_context_manager', return_value=mock_dev_context):
+            from mcp_server import handle_update_work_item
+            response = await handle_update_work_item(request)
+
+        response_data = json.loads(response.content[0].text)
+        assert response_data["success"] is True
+
+        # Verify only priority was passed
+        call_kwargs = mock_dev_context.update_work_item.call_args[1]
+        assert call_kwargs["priority"] == "low"
+        assert "status" not in call_kwargs  # Should not be in kwargs if not provided
+
+
 class TestMCPToolsIntegration:
     """Test MCP tools integration and JSON format consistency"""
 
@@ -332,6 +466,7 @@ class TestMCPToolsIntegration:
         assert "create_work_item" in tool_names
         assert "record_code_change" in tool_names
         assert "link_code_to_work" in tool_names
+        assert "update_work_item" in tool_names
 
 
 if __name__ == "__main__":
