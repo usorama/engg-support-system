@@ -27,6 +27,29 @@ interface VeracityPayload {
 }
 
 /**
+ * Qdrant payload from ingest-project.ts script
+ */
+interface IngestPayload {
+  content: string;
+  filePath: string;
+  project: string;
+  nodeType: string;
+  createdAt: string;
+}
+
+/**
+ * Union type for all possible payloads
+ */
+type QdrantPayload = VeracityPayload | IngestPayload;
+
+/**
+ * Check if payload is from ingest-project.ts
+ */
+function isIngestPayload(payload: QdrantPayload): payload is IngestPayload {
+  return "content" in payload && "filePath" in payload && "nodeType" in payload;
+}
+
+/**
  * Qdrant client for semantic search
  */
 export class QdrantGatewayClient {
@@ -102,25 +125,32 @@ export class QdrantGatewayClient {
       const latency = Date.now() - startTime;
 
       const matches: SemanticMatch[] = searchResults.map((result) => {
-        const payload = result.payload as unknown as VeracityPayload;
+        const payload = result.payload as unknown as QdrantPayload;
 
-        // Map veracity-engine payload to SemanticMatch format
-        const match: SemanticMatch = {
-          // Use docstring as content, or name if docstring is empty
-          content: payload.docstring || payload.name,
-          score: result.score,
-          // Use path as source
-          source: payload.path,
-          // Determine type from labels
-          type: this.determineContentType(payload.labels),
-          // Include additional metadata in content
-          name: payload.name,
-          path: payload.path,
-          docstring: payload.docstring,
-          qualified_name: payload.qualified_name,
-        } as SemanticMatch & { name?: string; path?: string; docstring?: string; qualified_name?: string };
-
-        return match;
+        // Handle both payload formats
+        if (isIngestPayload(payload)) {
+          // IngestPayload from ingest-project.ts
+          const match: SemanticMatch = {
+            content: payload.content,
+            score: result.score,
+            source: payload.filePath,
+            type: this.determineContentTypeFromNodeType(payload.nodeType),
+          };
+          return match;
+        } else {
+          // VeracityPayload from veracity-engine
+          const match: SemanticMatch = {
+            content: payload.docstring || payload.name,
+            score: result.score,
+            source: payload.path,
+            type: this.determineContentType(payload.labels || []),
+            name: payload.name,
+            path: payload.path,
+            docstring: payload.docstring,
+            qualified_name: payload.qualified_name,
+          } as SemanticMatch & { name?: string; path?: string; docstring?: string; qualified_name?: string };
+          return match;
+        }
       });
 
       const summary = this.generateSummary(matches);
@@ -140,13 +170,26 @@ export class QdrantGatewayClient {
   }
 
   /**
-   * Determine content type from labels
+   * Determine content type from labels (VeracityPayload)
    */
   private determineContentType(labels: string[]): "code" | "doc" | "comment" {
     if (labels.includes("Document") || labels.includes("Doc")) {
       return "doc";
     }
     if (labels.includes("Code") || labels.includes("Function") || labels.includes("Class")) {
+      return "code";
+    }
+    return "code";
+  }
+
+  /**
+   * Determine content type from nodeType (IngestPayload)
+   */
+  private determineContentTypeFromNodeType(nodeType: string): "code" | "doc" | "comment" {
+    if (nodeType === "MARKDOWN" || nodeType === "DOCUMENT") {
+      return "doc";
+    }
+    if (nodeType === "CODE") {
       return "code";
     }
     return "code";
