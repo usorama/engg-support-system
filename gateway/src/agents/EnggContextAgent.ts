@@ -23,6 +23,7 @@ import type {
 } from "../types/agent-contracts.js";
 import { QdrantGatewayClient, type QdrantClientConfig } from "../utils/qdrant-client.js";
 import { Neo4jGatewayClient } from "../utils/neo4j-client.js";
+import { VeracityMCPClient, type VeracityMCPConfig } from "../services/VeracityMCPClient.js";
 import { SynthesisAgent, type SynthesisAgentConfig } from "./SynthesisAgent.js";
 import { classifyQuery, type QueryClassification } from "./QueryClassifier.js";
 import { generateClarifications } from "./ClarificationGenerator.js";
@@ -40,6 +41,8 @@ export interface EnggContextAgentConfig {
     user: string;
     password: string;
   };
+  /** Optional: Use MCP client for veracity-engine instead of direct Neo4j */
+  veracityMCP?: VeracityMCPConfig;
   ollama?: {
     url: string;
     embedModel: string;
@@ -59,18 +62,37 @@ export interface EnggContextAgentConfig {
     /** Request timeout in ms */
     timeout?: number;
   };
+  /** Optional embedding fallback for when Ollama is unavailable */
+  embeddingFallback?: {
+    /** Embedding provider: "openai" | "voyage" */
+    provider: "openai" | "voyage";
+    /** API key */
+    apiKey: string;
+    /** Model name (default: text-embedding-3-small for OpenAI) */
+    model?: string;
+    /** Expected dimensions (must match Qdrant collection - 768 or 1536) */
+    dimensions?: number;
+  };
 }
 
 /**
  * Engineering Context Agent
- * Deterministic query agent that ALWAYS queries both Qdrant and Neo4j
+ * Deterministic query agent that ALWAYS queries both Qdrant and Neo4j (or MCP)
  */
 export class EnggContextAgent {
   private qdrantClient: QdrantGatewayClient;
   private neo4jClient: Neo4jGatewayClient;
+  private veracityMCPClient?: VeracityMCPClient;
+  private useMCP: boolean;
   private ollamaUrl?: string;
   private ollamaModel?: string;
   private synthesisAgent?: SynthesisAgent;
+  private embeddingFallback?: {
+    provider: "openai" | "voyage";
+    apiKey: string;
+    model: string;
+    dimensions: number;
+  };
 
   constructor(config: EnggContextAgentConfig) {
     const qdrantConfig: QdrantClientConfig = {
@@ -89,6 +111,14 @@ export class EnggContextAgent {
       user: config.neo4j.user,
       password: config.neo4j.password,
     });
+
+    // Initialize MCP client if configured
+    if (config.veracityMCP !== undefined) {
+      this.veracityMCPClient = new VeracityMCPClient(config.veracityMCP);
+      this.useMCP = true;
+    } else {
+      this.useMCP = false;
+    }
 
     // Configure Ollama for embeddings
     if (config.ollama !== undefined) {
@@ -124,6 +154,17 @@ export class EnggContextAgent {
         timeout: getSynthesisTimeout(),
       });
     }
+
+    // Configure embedding fallback for when Ollama is unavailable
+    if (config.embeddingFallback !== undefined) {
+      this.embeddingFallback = {
+        provider: config.embeddingFallback.provider,
+        apiKey: config.embeddingFallback.apiKey,
+        model: config.embeddingFallback.model ?? "text-embedding-3-small",
+        dimensions: config.embeddingFallback.dimensions ?? 1536,
+      };
+      console.log(`[EnggContextAgent] Embedding fallback configured: ${this.embeddingFallback.provider}`);
+    }
   }
 
   /**
@@ -149,20 +190,45 @@ export class EnggContextAgent {
 
     // One-shot mode: proceed with normal query flow
     const queryType = classification.intent;
+    const warnings: string[] = [];
 
-    // Generate embedding for query (if Ollama available)
-    const queryVector = this.ollamaUrl
-      ? await this.generateEmbedding(request.query)
-      : null;
+    // Check Ollama availability first (fast 5s check) to avoid slow embedding timeout
+    const ollamaAvailable = await this.isOllamaAvailable();
+
+    // Generate embedding - try Ollama first, then fallback
+    let queryVector: number[] | null = null;
+    let usedFallback = false;
+
+    if (ollamaAvailable) {
+      queryVector = await this.generateEmbedding(request.query);
+    } else if (this.embeddingFallback !== undefined) {
+      // Ollama down but we have a fallback
+      console.log("[EnggContextAgent] Ollama unavailable, using embedding fallback");
+      queryVector = await this.generateFallbackEmbedding(request.query);
+      if (queryVector !== null) {
+        usedFallback = true;
+        warnings.push("⚠️ Using fallback embedding provider (Ollama unavailable)");
+      } else {
+        warnings.push("⚠️ Both Ollama and fallback embedding failed: Semantic search disabled");
+      }
+    } else if (this.ollamaUrl !== undefined) {
+      // Ollama down and no fallback configured
+      warnings.push("⚠️ Ollama unavailable: Semantic search disabled (structural search only)");
+    }
 
     // Query both databases in parallel
-    const [qdrantAvailable, neo4jAvailable] = await Promise.all([
+    // Use MCP client if configured, otherwise use direct Neo4j
+    const structuralClient = this.useMCP && this.veracityMCPClient
+      ? this.veracityMCPClient
+      : this.neo4jClient;
+
+    const [qdrantAvailable, structuralAvailable] = await Promise.all([
       this.qdrantClient.isAvailable(),
-      this.neo4jClient.isAvailable(),
+      structuralClient.isAvailable(),
     ]);
 
     // Handle different availability scenarios
-    if (!qdrantAvailable && !neo4jAvailable) {
+    if (!qdrantAvailable && !structuralAvailable) {
       return this.createUnavailableResponse(request, Date.now() - startTime);
     }
 
@@ -171,14 +237,20 @@ export class EnggContextAgent {
       qdrantAvailable && queryVector
         ? this.qdrantClient.semanticSearch(request.query, queryVector)
         : Promise.reject(new Error("Qdrant unavailable")),
-      neo4jAvailable
-        ? this.neo4jClient.structuralSearch(
-            request.query,
-            request.project === undefined
-              ? { limit: 10 }
-              : { limit: 10, project: request.project },
-          )
-        : Promise.reject(new Error("Neo4j unavailable")),
+      structuralAvailable
+        ? this.useMCP && this.veracityMCPClient && request.project !== undefined
+          ? this.veracityMCPClient.query(request.query, {
+              project: request.project,
+              maxResults: 10,
+              synthesize: false, // MCP always returns raw evidence
+            })
+          : this.neo4jClient.structuralSearch(
+              request.query,
+              request.project === undefined
+                ? { limit: 10 }
+                : { limit: 10, project: request.project },
+            )
+        : Promise.reject(new Error("Structural search unavailable")),
     ]);
 
     const totalLatency = Date.now() - startTime;
@@ -186,16 +258,17 @@ export class EnggContextAgent {
     // Extract results and capture errors
     const qdrantResult =
       results[0].status === "fulfilled" ? results[0].value : null;
-    const neo4jResult =
+    const structuralResult =
       results[1].status === "fulfilled" ? results[1].value : null;
 
     // Capture error messages for debugging
     const qdrantError = results[0].status === "rejected" ? (results[0].reason as Error).message : null;
-    const neo4jError = results[1].status === "rejected" ? (results[1].reason as Error).message : null;
+    const structuralError = results[1].status === "rejected" ? (results[1].reason as Error).message : null;
 
     // Log errors for debugging
-    if (neo4jError) {
-      console.error(`[EnggContextAgent] Neo4j query failed: ${neo4jError}`);
+    if (structuralError) {
+      const clientType = this.useMCP ? "MCP" : "Neo4j";
+      console.error(`[EnggContextAgent] ${clientType} query failed: ${structuralError}`);
     }
     if (qdrantError) {
       console.error(`[EnggContextAgent] Qdrant query failed: ${qdrantError}`);
@@ -204,9 +277,9 @@ export class EnggContextAgent {
     // Determine response status
     const status = this.determineStatus(
       qdrantAvailable,
-      neo4jAvailable,
+      structuralAvailable,
       qdrantResult,
-      neo4jResult,
+      structuralResult,
     );
 
     // Build base response (raw results)
@@ -215,12 +288,12 @@ export class EnggContextAgent {
       queryType,
       status,
       qdrantResult,
-      neo4jResult,
+      neo4jResult: structuralResult,
       qdrantAvailable,
-      neo4jAvailable,
+      neo4jAvailable: structuralAvailable,
       totalLatency,
       qdrantError,
-      neo4jError,
+      neo4jError: structuralError,
     });
 
     // If raw mode requested or no synthesis agent, return raw results
@@ -296,6 +369,30 @@ export class EnggContextAgent {
   }
 
   /**
+   * Check if Ollama service is available (quick health check)
+   * Returns true if Ollama API responds within 5 seconds
+   */
+  private async isOllamaAvailable(): Promise<boolean> {
+    if (this.ollamaUrl === undefined) {
+      return false;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout for health check
+
+    try {
+      const response = await fetch(`${this.ollamaUrl}/api/tags`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return response.ok;
+    } catch {
+      clearTimeout(timeoutId);
+      return false;
+    }
+  }
+
+  /**
    * Generate embedding via Ollama
    */
   private async generateEmbedding(
@@ -343,6 +440,59 @@ export class EnggContextAgent {
           error,
         );
       }
+      return null;
+    }
+  }
+
+  /**
+   * Generate embedding using fallback provider (OpenAI)
+   * Used when Ollama is unavailable
+   */
+  private async generateFallbackEmbedding(text: string): Promise<number[] | null> {
+    if (this.embeddingFallback === undefined) {
+      return null;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    try {
+      if (this.embeddingFallback.provider === "openai") {
+        const response = await fetch("https://api.openai.com/v1/embeddings", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${this.embeddingFallback.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: this.embeddingFallback.model,
+            input: text,
+            dimensions: this.embeddingFallback.dimensions,
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          console.error(
+            `[EnggContextAgent] OpenAI embedding fallback failed: ${response.status}`,
+          );
+          return null;
+        }
+
+        const data = (await response.json()) as {
+          data?: Array<{ embedding?: number[] }>;
+        };
+        return data.data?.[0]?.embedding ?? null;
+      }
+
+      // Voyage AI fallback (future implementation)
+      console.warn("[EnggContextAgent] Voyage embedding fallback not yet implemented");
+      return null;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error("[EnggContextAgent] Fallback embedding failed:", error);
       return null;
     }
   }
@@ -498,6 +648,9 @@ export class EnggContextAgent {
    */
   async close(): Promise<void> {
     await this.neo4jClient.close();
+    if (this.veracityMCPClient) {
+      await this.veracityMCPClient.close();
+    }
   }
 
   /**

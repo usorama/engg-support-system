@@ -106,6 +106,24 @@ if (synthesisApiUrl && synthesisApiKey) {
   };
 }
 
+// Configure embedding fallback (for when Ollama is unavailable)
+// Uses OpenAI embeddings with configurable dimensions to match Qdrant collection
+const embeddingFallbackApiKey = process.env.EMBEDDING_FALLBACK_API_KEY ?? process.env.OPENAI_API_KEY;
+if (embeddingFallbackApiKey) {
+  const fallbackProvider = (process.env.EMBEDDING_FALLBACK_PROVIDER ?? "openai") as "openai" | "voyage";
+  config.embeddingFallback = {
+    provider: fallbackProvider,
+    apiKey: embeddingFallbackApiKey,
+    model: process.env.EMBEDDING_FALLBACK_MODEL ?? "text-embedding-3-small",
+    // Default to 768 to match nomic-embed-text dimensions in Qdrant
+    // Set EMBEDDING_FALLBACK_DIMENSIONS=1536 if your collection uses 1536-dim vectors
+    dimensions: process.env.EMBEDDING_FALLBACK_DIMENSIONS
+      ? parseInt(process.env.EMBEDDING_FALLBACK_DIMENSIONS, 10)
+      : 768,
+  };
+  console.log(`[Config] Embedding fallback enabled: ${fallbackProvider} (${config.embeddingFallback.dimensions} dims)`);
+}
+
 // Initialize agent and metrics store
 let agent: EnggContextAgent;
 const metricsStore = new QueryMetricsStore(7); // 7-day TTL
