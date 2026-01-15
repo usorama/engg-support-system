@@ -38,6 +38,10 @@ import type {
   ConversationRequest,
   GatewayResponse,
 } from "./types/agent-contracts.js";
+import {
+  getProviderChainConfig,
+  logProviderChainSummary,
+} from "./config/providers.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -879,6 +883,10 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 const PORT = process.env.PORT ?? process.env.ESS_GATEWAY_PORT ?? 3001;
 
 async function startServer(): Promise<void> {
+  // Log provider chain configuration
+  const providerChain = getProviderChainConfig();
+  logProviderChainSummary(providerChain);
+
   // Initialize agent
   agent = new EnggContextAgent(config);
 
