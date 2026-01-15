@@ -656,11 +656,12 @@ export class EnggContextAgent {
   /**
    * Handle conversational mode query
    * Returns clarification questions or executes query after context collection
+   * Falls back to one-shot mode if no clarification questions can be generated
    */
   private async queryWithConversation(
     request: QueryRequestWithMode,
     classification: QueryClassification,
-  ): Promise<ConversationResponse> {
+  ): Promise<GatewayResponse> {
     // Start or continue conversation
     const conversationState =
       await conversationManager.startConversation(request.query);
@@ -670,6 +671,14 @@ export class EnggContextAgent {
       request.query,
       classification,
     );
+
+    // If no clarification questions can be generated, fall back to one-shot mode
+    // This handles cases where classification suggests conversational but
+    // the query is actually clear enough to answer directly
+    if (clarificationQuestions.length === 0) {
+      // Execute as one-shot query instead
+      return this.query({ ...request, mode: "one-shot" });
+    }
 
     // Build conversation response
     return {

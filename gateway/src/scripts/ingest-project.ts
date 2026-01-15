@@ -238,10 +238,16 @@ function findFiles(
     if (
       item === "node_modules" ||
       item === ".git" ||
+      item === ".claude" ||       // Claude Code skill definitions (meta-docs, not project code)
+      item === ".ai" ||           // AI-generated artifacts
       item === "dist" ||
+      item === "build" ||
       item === "__pycache__" ||
       item === "venv" ||
-      item === ".next"
+      item === ".venv" ||
+      item === ".next" ||
+      item === "coverage" ||      // Test coverage reports
+      item === ".nyc_output"      // NYC coverage output
     ) {
       continue;
     }
