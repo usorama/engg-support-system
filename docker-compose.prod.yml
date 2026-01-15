@@ -44,8 +44,8 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     container_name: ess-chat-ui
     restart: always
-    expose:
-      - "80"
+    ports:
+      - "3002:80"  # Expose to host for nginx reverse proxy
     depends_on:
       gateway:
         condition: service_healthy
@@ -57,14 +57,15 @@ services:
       timeout: 10s
       retries: 3
 
-  # HTTP Gateway (Internal - no external port exposure)
+  # HTTP Gateway (exposed to host for nginx reverse proxy)
   gateway:
     build:
       context: ./gateway
       dockerfile: Dockerfile
     container_name: ess-gateway
     restart: always
-    # No external ports - accessed via Caddy only
+    ports:
+      - "3001:3001"  # Expose to host for nginx reverse proxy
     expose:
       - "3001"
     environment:
