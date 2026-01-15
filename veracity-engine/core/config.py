@@ -91,6 +91,14 @@ class LoggingConfig(BaseModel):
         return v_upper
 
 
+class GitHubConfig(BaseModel):
+    """GitHub API integration configuration."""
+    token: SecretStr = Field(default=SecretStr(""), description="GitHub personal access token")
+    user_agent: str = Field(default="ESS-Dev-Context-Tracker/1.0", description="User-Agent for GitHub API requests")
+    api_base_url: str = Field(default="https://api.github.com", description="GitHub API base URL")
+    rate_limit_buffer: int = Field(default=10, description="Buffer requests before hitting rate limit")
+
+
 class ProjectConfig(BaseModel):
     """Project-specific configuration."""
     name: Optional[str] = Field(default=None, description="Project name for multitenancy")
@@ -107,6 +115,7 @@ class VeracityConfig(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    github: GitHubConfig = Field(default_factory=GitHubConfig)
     project: ProjectConfig = Field(default_factory=ProjectConfig)
 
     model_config = {"extra": "ignore"}

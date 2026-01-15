@@ -10,6 +10,7 @@
 
 import {
   SynthesisAgent,
+  type SynthesisAgentConfig,
   type SynthesisResult,
   type SynthesisOptions,
   type LLMProvider,
@@ -98,13 +99,17 @@ export class FallbackSynthesisAgent {
     // Map config type to LLMProvider
     const providerType: LLMProvider = config.type;
 
-    return new SynthesisAgent({
+    const agentConfig: SynthesisAgentConfig = {
       provider: providerType,
       baseUrl: config.baseUrl,
       model: config.model,
-      apiKey: config.apiKey,
       timeout: config.timeout ?? getSynthesisTimeout(),
-    });
+    };
+    // Only add apiKey if defined
+    if (config.apiKey) {
+      agentConfig.apiKey = config.apiKey;
+    }
+    return new SynthesisAgent(agentConfig);
   }
 
   /**
@@ -227,10 +232,12 @@ export class FallbackSynthesisAgent {
     if (success) {
       status.available = true;
       status.consecutiveFailures = 0;
-      status.lastError = undefined;
+      delete status.lastError;
     } else {
       status.consecutiveFailures++;
-      status.lastError = error;
+      if (error) {
+        status.lastError = error;
+      }
       if (status.consecutiveFailures >= this.maxConsecutiveFailures) {
         status.available = false;
       }
@@ -268,12 +275,17 @@ export class FallbackSynthesisAgent {
    * Get list of configured providers
    */
   getProviders(): Array<{ id: string; name: string; model: string; isFree?: boolean }> {
-    return this.providers.map(({ config }) => ({
-      id: config.id,
-      name: config.name,
-      model: config.model,
-      isFree: config.isFree,
-    }));
+    return this.providers.map(({ config }) => {
+      const provider: { id: string; name: string; model: string; isFree?: boolean } = {
+        id: config.id,
+        name: config.name,
+        model: config.model,
+      };
+      if (config.isFree !== undefined) {
+        provider.isFree = config.isFree;
+      }
+      return provider;
+    });
   }
 }
 

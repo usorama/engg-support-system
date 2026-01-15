@@ -730,3 +730,126 @@ class DevContextManager:
                 traces.append(trace)
 
             return traces
+
+    def get_orphan_commits(self, max_count: int = 100, age_days: int = 30) -> List[Dict[str, Any]]:
+        """
+        Get Git commits that are not linked to any work items.
+
+        Orphaned commits are CodeChange nodes that don't have LINKS_TO relationships
+        with WorkItem nodes. These commits represent work that may need to be
+        categorized and tracked.
+
+        Args:
+            max_count: Maximum number of orphan commits to return
+            age_days: Only include commits newer than this many days
+
+        Returns:
+            List of commit dictionaries with commit_hash, message, author, etc.
+        """
+        # Calculate cutoff date
+        from datetime import datetime, timezone, timedelta
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
+
+        query = """
+        MATCH (c:CodeChange)
+        WHERE NOT (c)-[:LINKS_TO]->(:WorkItem)
+          AND c.timestamp >= $cutoff_date
+        RETURN DISTINCT c.commit_hash AS commit_hash,
+               c.author AS author,
+               c.timestamp AS timestamp,
+               count(c) AS file_changes
+        ORDER BY c.timestamp DESC
+        LIMIT $max_count
+        """
+
+        with self._driver.session() as session:
+            result = session.run(query, {
+                "cutoff_date": cutoff_date,
+                "max_count": max_count
+            })
+
+            orphan_commits = []
+            for record in result:
+                commit = {
+                    "commit_hash": record["commit_hash"],
+                    "author": record["author"],
+                    "timestamp": record["timestamp"],
+                    "file_changes": record["file_changes"],
+                    "message": ""  # Will be populated by GitAnalyzer from actual git repo
+                }
+                orphan_commits.append(commit)
+
+            return orphan_commits
+
+    def link_code_to_work(self, work_item_uid: str = None, code_change_uid: str = None,
+                         commit_hash: str = None, link_type: str = "direct",
+                         confidence: float = 1.0) -> bool:
+        """
+        Create LINKS_TO relationship between CodeChange and WorkItem.
+
+        Supports linking by either code_change_uid or commit_hash.
+
+        Args:
+            work_item_uid: WorkItem UID
+            code_change_uid: CodeChange UID (alternative to commit_hash)
+            commit_hash: Git commit hash (alternative to code_change_uid)
+            link_type: Type of link (direct, commit, inferred)
+            confidence: Confidence score for the link (0.0-1.0)
+
+        Returns:
+            True if link created successfully
+        """
+        if code_change_uid:
+            # Original behavior - link by code_change_uid
+            query = """
+            MATCH (c:CodeChange {uid: $code_change_uid})
+            MATCH (w:WorkItem {uid: $work_item_uid})
+            MERGE (c)-[r:LINKS_TO {
+                confidence: $confidence,
+                link_type: $link_type,
+                linked_at: $linked_at
+            }]->(w)
+            RETURN r
+            """
+
+            params = {
+                "code_change_uid": code_change_uid,
+                "work_item_uid": work_item_uid,
+                "confidence": confidence,
+                "link_type": link_type,
+                "linked_at": datetime.now(timezone.utc).isoformat()
+            }
+
+        elif commit_hash:
+            # New behavior - link by commit_hash (for orphan commits)
+            query = """
+            MATCH (c:CodeChange {commit_hash: $commit_hash})
+            MATCH (w:WorkItem {uid: $work_item_uid})
+            MERGE (c)-[r:LINKS_TO {
+                confidence: $confidence,
+                link_type: $link_type,
+                linked_at: $linked_at
+            }]->(w)
+            RETURN count(r) AS links_created
+            """
+
+            params = {
+                "commit_hash": commit_hash,
+                "work_item_uid": work_item_uid,
+                "confidence": confidence,
+                "link_type": link_type,
+                "linked_at": datetime.now(timezone.utc).isoformat()
+            }
+        else:
+            raise ValueError("Either code_change_uid or commit_hash must be provided")
+
+        with self._driver.session() as session:
+            result = session.run(query, params)
+            record = result.single()
+
+            if commit_hash:
+                # For commit_hash linking, check if any links were created
+                return record and record["links_created"] > 0
+            else:
+                # For code_change_uid linking, check if relationship exists
+                return record is not None

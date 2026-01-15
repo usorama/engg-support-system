@@ -52,6 +52,7 @@ from core.project_registry import register_project, WatchMode, get_project
 from core.build_graph import CodeGraphBuilder
 from core.file_ingestion import extract_file_metadata, extract_text_content
 from core.metrics.query_metrics import QueryMetrics
+from core.code_analyzer import CodeAnalyzer, IssueType, Confidence, AnalysisResult
 from core.dev_context import DevContextManager, WorkItemNotFoundError
 
 # Configure logging to stderr (stdout is reserved for MCP JSON-RPC)
@@ -705,6 +706,175 @@ Returns updated work item details.""",
             },
             "required": ["work_item_uid"]
         }
+    ),
+    Tool(
+        name="analyze_code_for_work",
+        description="""Analyze codebase to automatically detect work items (TODOs, bugs, incomplete features).
+
+Scans Python, JavaScript, and TypeScript files for:
+- TODO/FIXME comments (with confidence scoring)
+- Incomplete implementations (empty functions, NotImplementedError)
+- Error patterns (empty catch blocks, console.log in production)
+
+Modes:
+- preview mode (create_items=False): Returns list of detected issues
+- creation mode (create_items=True): Creates WorkItem nodes in graph
+
+Issue types map to work types:
+- TODO -> todo
+- FIXME -> bug
+- INCOMPLETE -> feature
+- ERROR_PATTERN -> bug
+
+Confidence levels map to priorities:
+- HIGH -> high
+- MEDIUM -> medium
+- LOW -> low""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {
+                    "type": "string",
+                    "description": "The indexed project name"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Optional: analyze specific file only (relative to project root)"
+                },
+                "create_items": {
+                    "type": "boolean",
+                    "description": "If true, create WorkItem nodes in graph (default: false)",
+                    "default": False
+                },
+                "min_confidence": {
+                    "type": "string",
+                    "description": "Minimum confidence level to report (high, medium, low)",
+                    "enum": ["high", "medium", "low"]
+                }
+            },
+            "required": ["project_name"]
+        }
+    ),
+    Tool(
+        name="sync_work_to_github",
+        description="""Sync work items from Neo4j graph to GitHub issues.
+
+Creates and updates GitHub issues based on work items stored in the development context graph.
+Supports bidirectional sync with external_id tracking for issue mapping.
+
+Features:
+- Create new GitHub issues from work items without external_id
+- Update existing GitHub issues when work items change
+- Map work item types/priorities to GitHub labels
+- Dry run mode for previewing changes
+- Rate limiting and error handling
+
+Use cases:
+- Export code analysis results to GitHub for team visibility
+- Sync manual work items to issue tracker
+- Keep GitHub issues in sync with development context""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {
+                    "type": "string",
+                    "description": "Project name to query work items from"
+                },
+                "github_repo": {
+                    "type": "string",
+                    "description": "GitHub repository in 'owner/repo' format"
+                },
+                "create_issues": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Create new GitHub issues for work items without external_id"
+                },
+                "update_existing": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Update existing GitHub issues for work items with external_id"
+                },
+                "close_resolved": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Close GitHub issues for work items marked as resolved"
+                },
+                "status_filter": {
+                    "type": "string",
+                    "description": "Filter work items by status (comma-separated: open,in_progress,closed)"
+                },
+                "work_type_filter": {
+                    "type": "string",
+                    "description": "Filter work items by type (comma-separated: bug,feature,todo,chore)"
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Preview changes without executing GitHub API calls"
+                }
+            },
+            "required": ["project_name", "github_repo"]
+        }
+    ),
+    Tool(
+        name="auto_link_orphan_commits",
+        description="""Automatically link orphaned Git commits to existing work items.
+
+Analyzes Git commits that aren't linked to work items and automatically creates linkage
+based on semantic analysis of commit messages, file change patterns, and conventional commit types.
+
+Features:
+- Semantic similarity analysis between commit messages and work item descriptions
+- File pattern matching (commits touching auth files → auth work items)
+- Conventional commit type detection (feat:, fix:, chore:, docs:)
+- Confidence scoring for reliable automatic linking
+- Dry run mode for previewing potential links
+- Age and count filtering for processing control
+
+Use cases:
+- Link recent commits to existing work items automatically
+- Clean up development history for better traceability
+- Reduce manual work item management overhead""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {
+                    "type": "string",
+                    "description": "Project name to analyze orphan commits from"
+                },
+                "min_confidence": {
+                    "type": "number",
+                    "default": 0.7,
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "description": "Minimum confidence threshold for creating links (0.0-1.0)"
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Preview potential links without creating them"
+                },
+                "max_commits": {
+                    "type": "integer",
+                    "default": 100,
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "description": "Maximum number of orphan commits to analyze"
+                },
+                "commit_age_days": {
+                    "type": "integer",
+                    "default": 30,
+                    "minimum": 1,
+                    "maximum": 365,
+                    "description": "Only analyze commits newer than this many days"
+                },
+                "work_item_types": {
+                    "type": "string",
+                    "description": "Filter work items by type (comma-separated: bug,feature,todo,chore)"
+                }
+            },
+            "required": ["project_name"]
+        }
     )
 ]
 
@@ -763,6 +933,12 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
             return await handle_trace_file_to_work(arguments)
         elif name == "update_work_item":
             return await handle_update_work_item(arguments)
+        elif name == "analyze_code_for_work":
+            return await handle_analyze_code_for_work(arguments)
+        elif name == "sync_work_to_github":
+            return await handle_sync_work_to_github(arguments)
+        elif name == "auto_link_orphan_commits":
+            return await handle_auto_link_orphan_commits(arguments)
         else:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Unknown tool: {name}")],
@@ -2087,6 +2263,220 @@ async def handle_update_work_item(args: dict) -> CallToolResult:
         )
 
 
+async def handle_analyze_code_for_work(args: dict) -> CallToolResult:
+    """Analyze codebase to detect work items (TODOs, bugs, incomplete features)."""
+    project_name = args.get("project_name")
+    file_path = args.get("file_path")
+    create_items = args.get("create_items", False)
+    min_confidence_str = args.get("min_confidence")
+
+    if not project_name:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({"error": "project_name is required"})
+            )],
+            isError=True
+        )
+
+    try:
+        # Get project root directory
+        project = get_project(project_name)
+        if not project:
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=json.dumps({
+                        "error": f"Project '{project_name}' not found. Use register_project first."
+                    })
+                )],
+                isError=True
+            )
+
+        root_dir = project['root_dir']
+
+        # Parse min_confidence if provided
+        min_confidence = None
+        if min_confidence_str:
+            confidence_map = {
+                "high": Confidence.HIGH,
+                "medium": Confidence.MEDIUM,
+                "low": Confidence.LOW
+            }
+            min_confidence = confidence_map.get(min_confidence_str.lower())
+            if not min_confidence:
+                return CallToolResult(
+                    content=[TextContent(
+                        type="text",
+                        text=json.dumps({
+                            "error": f"Invalid min_confidence: {min_confidence_str}"
+                        })
+                    )],
+                    isError=True
+                )
+
+        # Create analyzer
+        analyzer = CodeAnalyzer(min_confidence=min_confidence)
+
+        # Analyze codebase or specific file
+        if file_path:
+            # Analyze single file
+            from pathlib import Path
+            full_path = Path(root_dir) / file_path
+            if not full_path.exists():
+                return CallToolResult(
+                    content=[TextContent(
+                        type="text",
+                        text=json.dumps({
+                            "error": f"File not found: {file_path}"
+                        })
+                    )],
+                    isError=True
+                )
+
+            issues = analyzer.analyze_file(str(full_path))
+            result = AnalysisResult()
+            result.all_issues = issues
+            result.total_files_analyzed = 1
+            for issue in issues:
+                result.issues_by_type[issue.issue_type] += 1
+        else:
+            # Analyze entire codebase
+            result = analyzer.analyze_codebase(root_dir)
+
+        # Map issue types to work types
+        issue_to_work_type = {
+            IssueType.TODO: "todo",
+            IssueType.FIXME: "bug",
+            IssueType.INCOMPLETE: "feature",
+            IssueType.ERROR_PATTERN: "bug"
+        }
+
+        # Map confidence to priority
+        confidence_to_priority = {
+            Confidence.HIGH: "high",
+            Confidence.MEDIUM: "medium",
+            Confidence.LOW: "low"
+        }
+
+        # Format issues for output
+        issues_list = []
+        for issue in result.get_sorted_issues_by_severity():
+            issues_list.append({
+                "issue_type": issue.issue_type.value,
+                "file_path": issue.file_path,
+                "line_number": issue.line_number,
+                "title": issue.message,
+                "message": issue.message,
+                "confidence": issue.confidence.value,
+                "work_type": issue_to_work_type[issue.issue_type],
+                "priority": confidence_to_priority[issue.confidence]
+            })
+
+        # Build response data
+        data = {
+            "project_name": project_name,
+            "total_files_analyzed": result.total_files_analyzed,
+            "total_issues": result.total_issues,
+            "issues": issues_list,
+            "summary": result.get_summary()
+        }
+
+        # Create work items if requested
+        if create_items and result.total_issues > 0:
+            config = get_config()
+            dev_context = DevContextManager(
+                project_name=project_name,
+                neo4j_uri=config.neo4j.uri,
+                neo4j_user=config.neo4j.user,
+                neo4j_password=config.neo4j.password.get_secret_value()
+            )
+            created_items = []
+
+            try:
+                # Filter issues by confidence if min_confidence is set
+                issues_to_create = result.all_issues
+                if min_confidence:
+                    confidence_values = {
+                        Confidence.HIGH: 3,
+                        Confidence.MEDIUM: 2,
+                        Confidence.LOW: 1
+                    }
+                    min_value = confidence_values[min_confidence]
+                    issues_to_create = [
+                        issue for issue in result.all_issues
+                        if confidence_values[issue.confidence] >= min_value
+                    ]
+
+                for issue in issues_to_create:
+                    work_type = issue_to_work_type[issue.issue_type]
+                    priority = confidence_to_priority[issue.confidence]
+
+                    # Create descriptive title
+                    title = f"[{issue.issue_type.value.upper()}] {issue.message}"
+                    description = f"{issue.message}\n\nFile: {issue.file_path}\nLine: {issue.line_number}\nConfidence: {issue.confidence.value}"
+
+                    # Create work item
+                    uid = dev_context.create_work_item(
+                        title=title,
+                        description=description,
+                        work_type=work_type,
+                        priority=priority,
+                        status="open",
+                        source="code_analyzer"
+                    )
+
+                    created_items.append({
+                        "uid": uid,
+                        "title": title,
+                        "work_type": work_type,
+                        "priority": priority
+                    })
+
+                data["work_items_created"] = len(created_items)
+                data["created_items"] = created_items
+
+            finally:
+                dev_context.close()
+
+        response = {
+            "success": True,
+            "data": data
+        }
+
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps(response, indent=2)
+            )]
+        )
+
+    except FileNotFoundError as e:
+        logger.error(f"File/directory not found: {e}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+    except Exception as e:
+        logger.error(f"Failed to analyze code for work: {e}", exc_info=True)
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+
+
 # ============================================================================
 # Main Entry Point
 # ============================================================================
@@ -2380,5 +2770,435 @@ async def handle_ingest_files(args: dict) -> CallToolResult:
         logger.error(f"File ingestion failed: {e}", exc_info=True)
         return CallToolResult(
             content=[TextContent(type="text", text=f"File ingestion failed: {str(e)}")],
+            isError=True
+        )
+
+
+async def handle_sync_work_to_github(args: dict) -> CallToolResult:
+    """Sync work items from Neo4j graph to GitHub issues."""
+    try:
+        from .github_client import GitHubClient, map_work_item_to_github_issue, GitHubAPIError, GitHubRateLimitError
+    except ImportError:
+        # Fallback for test environments where relative imports don't work
+        import github_client
+        GitHubClient = github_client.GitHubClient
+        map_work_item_to_github_issue = github_client.map_work_item_to_github_issue
+        GitHubAPIError = github_client.GitHubAPIError
+        GitHubRateLimitError = github_client.GitHubRateLimitError
+
+    project_name = args.get("project_name")
+    github_repo = args.get("github_repo")
+    create_issues = args.get("create_issues", True)
+    update_existing = args.get("update_existing", False)
+    close_resolved = args.get("close_resolved", False)
+    status_filter = args.get("status_filter")
+    work_type_filter = args.get("work_type_filter")
+    dry_run = args.get("dry_run", False)
+
+    if not project_name or not github_repo:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({"error": "project_name and github_repo are required"})
+            )],
+            isError=True
+        )
+
+    # Validate GitHub repo format
+    if "/" not in github_repo or len(github_repo.split("/")) != 2:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": f"Invalid repo format: {github_repo}. Expected 'owner/repo'"
+                })
+            )],
+            isError=True
+        )
+
+    try:
+        # Get configuration and initialize clients
+        config = get_config()
+        github_token = config.github.token.get_secret_value()
+
+        if not github_token:
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=json.dumps({
+                        "success": False,
+                        "error": "GitHub token not configured. Set GITHUB_TOKEN environment variable."
+                    })
+                )],
+                isError=True
+            )
+
+        # Initialize clients
+        github_client = GitHubClient(token=github_token)
+        dev_context = get_dev_context_manager(project_name)
+
+        try:
+            # Build query filters
+            query_filters = {}
+            if status_filter:
+                query_filters["status"] = status_filter
+            if work_type_filter:
+                query_filters["work_type"] = work_type_filter
+
+            # Query work items from Neo4j
+            work_items = dev_context.query_work_items(**query_filters)
+
+            sync_results = {
+                "issues_created": 0,
+                "issues_updated": 0,
+                "issues_closed": 0,
+                "errors": [],
+                "sync_details": []
+            }
+
+            preview_actions = []
+
+            for work_item in work_items:
+                work_item_uid = work_item["uid"]
+                external_id = work_item.get("external_id")
+
+                try:
+                    # Map work item to GitHub issue format
+                    github_issue_data = map_work_item_to_github_issue(work_item)
+
+                    if not external_id and create_issues:
+                        # Create new GitHub issue
+                        if dry_run:
+                            preview_actions.append({
+                                "action": "create",
+                                "work_item_uid": work_item_uid,
+                                "title": github_issue_data["title"],
+                                "labels": github_issue_data["labels"]
+                            })
+                        else:
+                            github_issue = github_client.create_issue(
+                                repo=github_repo,
+                                title=github_issue_data["title"],
+                                body=github_issue_data["body"],
+                                labels=github_issue_data["labels"]
+                            )
+
+                            # Update work item with external_id
+                            dev_context.update_work_item(
+                                work_item_uid,
+                                external_id=str(github_issue["number"]),
+                                synced_at=datetime.now().isoformat()
+                            )
+
+                            sync_results["issues_created"] += 1
+                            sync_results["sync_details"].append({
+                                "work_item_uid": work_item_uid,
+                                "action": "created",
+                                "github_issue": github_issue["number"],
+                                "github_url": github_issue["html_url"]
+                            })
+
+                    elif external_id and update_existing:
+                        # Update existing GitHub issue
+                        if dry_run:
+                            preview_actions.append({
+                                "action": "update",
+                                "work_item_uid": work_item_uid,
+                                "github_issue": external_id,
+                                "title": github_issue_data["title"],
+                                "state": github_issue_data["state"]
+                            })
+                        else:
+                            github_issue = github_client.update_issue(
+                                repo=github_repo,
+                                issue_number=int(external_id),
+                                title=github_issue_data["title"],
+                                body=github_issue_data["body"],
+                                state=github_issue_data["state"],
+                                labels=github_issue_data["labels"]
+                            )
+
+                            sync_results["issues_updated"] += 1
+                            sync_results["sync_details"].append({
+                                "work_item_uid": work_item_uid,
+                                "action": "updated",
+                                "github_issue": external_id,
+                                "github_url": github_issue["html_url"]
+                            })
+
+                    elif external_id and close_resolved and work_item["status"] in ["closed", "resolved", "done"]:
+                        # Close resolved GitHub issue
+                        if dry_run:
+                            preview_actions.append({
+                                "action": "close",
+                                "work_item_uid": work_item_uid,
+                                "github_issue": external_id
+                            })
+                        else:
+                            github_client.update_issue(
+                                repo=github_repo,
+                                issue_number=int(external_id),
+                                state="closed"
+                            )
+
+                            sync_results["issues_closed"] += 1
+                            sync_results["sync_details"].append({
+                                "work_item_uid": work_item_uid,
+                                "action": "closed",
+                                "github_issue": external_id
+                            })
+
+                except GitHubRateLimitError as e:
+                    error_msg = f"GitHub rate limit exceeded for work item {work_item_uid}: {str(e)}"
+                    logger.warning(error_msg)
+                    sync_results["errors"].append(error_msg)
+                    break  # Stop processing to respect rate limit
+
+                except Exception as e:
+                    error_msg = f"Failed to sync work item {work_item_uid}: {str(e)}"
+                    logger.error(error_msg)
+                    sync_results["errors"].append(error_msg)
+
+            # Build response
+            response_data = {
+                "project_name": project_name,
+                "github_repo": github_repo,
+                "total_work_items": len(work_items),
+                **sync_results
+            }
+
+            if dry_run:
+                response_data["dry_run"] = True
+                response_data["preview"] = preview_actions
+
+            response = {
+                "success": True,
+                "data": response_data
+            }
+
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=json.dumps(response, indent=2)
+                )]
+            )
+
+        finally:
+            github_client.close()
+            dev_context.close()
+
+    except GitHubAPIError as e:
+        logger.error(f"GitHub API error during sync: {e}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": f"GitHub API error: {str(e)}"
+                })
+            )],
+            isError=True
+        )
+    except Exception as e:
+        logger.error(f"Failed to sync work to GitHub: {e}", exc_info=True)
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+
+
+async def handle_auto_link_orphan_commits(args: dict) -> CallToolResult:
+    """Automatically link orphaned Git commits to existing work items."""
+    try:
+        from .git_analyzer import GitAnalyzer, GitAnalysisError
+    except ImportError:
+        # Fallback for test environments where relative imports don't work
+        import git_analyzer
+        GitAnalyzer = git_analyzer.GitAnalyzer
+        GitAnalysisError = git_analyzer.GitAnalysisError
+
+    project_name = args.get("project_name")
+    min_confidence = args.get("min_confidence", 0.7)
+    dry_run = args.get("dry_run", False)
+    max_commits = args.get("max_commits", 100)
+    commit_age_days = args.get("commit_age_days", 30)
+    work_item_types = args.get("work_item_types")
+
+    if not project_name:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({"error": "project_name is required"})
+            )],
+            isError=True
+        )
+
+    try:
+        # Get DevContextManager
+        config = get_config()
+        dev_context_manager = get_dev_context_manager(project_name, config)
+
+        # Get orphan commits (commits not linked to work items)
+        orphan_commits = dev_context_manager.get_orphan_commits(
+            max_count=max_commits,
+            age_days=commit_age_days
+        )
+
+        if not orphan_commits:
+            response = {
+                "success": True,
+                "data": {
+                    "commits_analyzed": 0,
+                    "links_created": 0,
+                    "links_skipped": 0,
+                    "message": "No orphan commits found",
+                    "dry_run": dry_run
+                }
+            }
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps(response, indent=2))],
+                isError=False
+            )
+
+        # Get existing work items for matching
+        work_item_filters = {}
+        if work_item_types:
+            work_item_filters["work_type"] = work_item_types.split(",")
+
+        work_items = dev_context_manager.query_work_items(
+            project_name=project_name,
+            **work_item_filters
+        )
+
+        if not work_items:
+            response = {
+                "success": True,
+                "data": {
+                    "commits_analyzed": len(orphan_commits),
+                    "links_created": 0,
+                    "links_skipped": len(orphan_commits),
+                    "message": "No matching work items found for any commits",
+                    "dry_run": dry_run
+                }
+            }
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps(response, indent=2))],
+                isError=False
+            )
+
+        # Initialize Git analyzer
+        git_analyzer = GitAnalyzer()
+
+        # Analyze each orphan commit for potential work item links
+        link_results = []
+        links_created = 0
+        links_skipped = 0
+
+        for commit in orphan_commits:
+            try:
+                # Analyze commit relationship to work items
+                analysis = git_analyzer.analyze_commit_work_relation(commit, work_items)
+
+                commit_result = {
+                    "commit_hash": commit["commit_hash"],
+                    "commit_message": commit["message"],
+                    "confidence": analysis["confidence"],
+                    "commit_type": analysis["commit_type"],
+                    "reasons": analysis["reasons"],
+                    "work_item_uid": analysis["best_match"],
+                    "action": "skipped"
+                }
+
+                # Check if confidence meets threshold
+                if analysis["confidence"] >= min_confidence and analysis["best_match"]:
+                    if not dry_run:
+                        # Create actual link
+                        success = dev_context_manager.link_code_to_work(
+                            commit_hash=commit["commit_hash"],
+                            work_item_uid=analysis["best_match"],
+                            link_type="commit",
+                            confidence=analysis["confidence"]
+                        )
+
+                        if success:
+                            commit_result["action"] = "linked"
+                            links_created += 1
+                        else:
+                            commit_result["action"] = "failed"
+                            commit_result["error"] = "Failed to create link in database"
+                            links_skipped += 1
+                    else:
+                        # Dry run: just mark as would be linked
+                        commit_result["action"] = "would_link"
+                        links_created += 1
+                else:
+                    commit_result["action"] = "skipped_low_confidence"
+                    links_skipped += 1
+
+                link_results.append(commit_result)
+
+            except Exception as e:
+                logger.warning(f"Failed to analyze commit {commit['commit_hash']}: {e}")
+                commit_result = {
+                    "commit_hash": commit["commit_hash"],
+                    "commit_message": commit["message"],
+                    "confidence": 0.0,
+                    "action": "failed",
+                    "error": str(e)
+                }
+                link_results.append(commit_result)
+                links_skipped += 1
+
+        # Prepare response
+        response_data = {
+            "success": True,
+            "data": {
+                "commits_analyzed": len(orphan_commits),
+                "links_created": links_created,
+                "links_skipped": links_skipped,
+                "link_results": link_results,
+                "dry_run": dry_run
+            }
+        }
+
+        if dry_run:
+            response_data["data"]["potential_links"] = links_created
+            response_data["data"]["preview"] = [
+                r for r in link_results if r["action"] == "would_link"
+            ]
+
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(response_data, indent=2))],
+            isError=False
+        )
+
+    except KeyError as e:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": f"Project '{project_name}' not found: {str(e)}"
+                })
+            )],
+            isError=True
+        )
+    except Exception as e:
+        logger.error(f"Failed to auto-link orphan commits: {e}", exc_info=True)
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
             isError=True
         )

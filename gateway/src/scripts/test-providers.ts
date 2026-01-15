@@ -115,11 +115,14 @@ async function testSynthesisProvider(config: SynthesisProviderConfig): Promise<{
       responseText = data.content?.[0]?.text;
     }
 
-    return {
+    const result: { success: boolean; latency: number; error?: string; response?: string } = {
       success: true,
       latency,
-      response: responseText?.slice(0, 100),
     };
+    if (responseText) {
+      result.response = responseText.slice(0, 100);
+    }
+    return result;
   } catch (error) {
     return {
       success: false,
@@ -262,13 +265,16 @@ async function main(): Promise<void> {
       console.log(`     Error: ${result.error}`);
     }
 
-    synthesisResults.push({
+    const synthResult: { name: string; model: string; success: boolean; latency: number; error?: string } = {
       name: provider.name,
       model: provider.model,
       success: result.success,
       latency: result.latency,
-      error: result.error,
-    });
+    };
+    if (result.error) {
+      synthResult.error = result.error;
+    }
+    synthesisResults.push(synthResult);
 
     console.log("");
   }
@@ -298,14 +304,19 @@ async function main(): Promise<void> {
       console.log(`     Error: ${result.error}`);
     }
 
-    embeddingResults.push({
+    const embResult: { name: string; model: string; success: boolean; latency: number; dimensions?: number; error?: string } = {
       name: provider.name,
       model: provider.model,
       success: result.success,
       latency: result.latency,
-      dimensions: result.dimensions,
-      error: result.error,
-    });
+    };
+    if (result.dimensions !== undefined) {
+      embResult.dimensions = result.dimensions;
+    }
+    if (result.error) {
+      embResult.error = result.error;
+    }
+    embeddingResults.push(embResult);
 
     console.log("");
   }

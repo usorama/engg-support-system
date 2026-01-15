@@ -197,7 +197,7 @@ class TestDevContextManager:
             success = dev_context_manager.link_code_to_work(
                 work_item_uid=work_item_uid,
                 code_change_uid=code_change_uid,
-                link_confidence=0.9
+                confidence=0.9
             )
 
             assert success is True

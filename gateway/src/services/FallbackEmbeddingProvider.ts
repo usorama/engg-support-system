@@ -335,10 +335,12 @@ export class FallbackEmbeddingProvider {
     if (success) {
       status.available = true;
       status.consecutiveFailures = 0;
-      status.lastError = undefined;
+      delete status.lastError;
     } else {
       status.consecutiveFailures++;
-      status.lastError = error;
+      if (error) {
+        status.lastError = error;
+      }
       if (status.consecutiveFailures >= this.maxConsecutiveFailures) {
         status.available = false;
       }

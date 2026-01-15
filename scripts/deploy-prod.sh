@@ -109,6 +109,14 @@ docker build -t ess-gateway:latest -f gateway/Dockerfile gateway/
 echo "[BUILD] Building Chat UI..."
 docker build -t ess-chat-ui:latest -f gateway/ui/Dockerfile gateway/ui/
 
+# Build Veracity Engine (Dev Context Tracking)
+echo "[BUILD] Building Veracity Engine..."
+docker build -t ess-veracity-engine:latest -f veracity-engine/Dockerfile veracity-engine/
+
+# Build Veracity UI (Kanban Dashboard)
+echo "[BUILD] Building Veracity UI..."
+docker build -t ess-veracity-ui:latest -f veracity-engine/ui/Dockerfile veracity-engine/ui/
+
 echo "[BUILD] Build complete!"
 docker images | grep ess-
 BUILD_EOF
@@ -134,6 +142,10 @@ docker stop ess-gateway 2>/dev/null || true
 docker rm ess-gateway 2>/dev/null || true
 docker stop ess-chat-ui 2>/dev/null || true
 docker rm ess-chat-ui 2>/dev/null || true
+docker stop ess-veracity-engine 2>/dev/null || true
+docker rm ess-veracity-engine 2>/dev/null || true
+docker stop ess-veracity-ui 2>/dev/null || true
+docker rm ess-veracity-ui 2>/dev/null || true
 
 # Also stop any legacy processes
 pkill -f "node dist/server.js" 2>/dev/null || true
@@ -229,6 +241,61 @@ for i in {1..15}; do
     sleep 2
 done
 
+# Start Veracity Engine (Dev Context Tracking MCP Server)
+echo "[START] Starting Veracity Engine..."
+docker run -d \
+    --name ess-veracity-engine \
+    --restart unless-stopped \
+    --network ess-network \
+    -p 8000:8000 \
+    --health-cmd='curl -f http://localhost:8000/health || exit 1' \
+    --health-interval=30s \
+    --health-timeout=10s \
+    --health-retries=3 \
+    -e NEO4J_URI=bolt://ess-neo4j:7687 \
+    -e NEO4J_USER="${NEO4J_USER:-neo4j}" \
+    -e NEO4J_PASSWORD="${NEO4J_PASSWORD}" \
+    -e OLLAMA_URL="http://${DOCKER_HOST_IP}:11434" \
+    -e EMBEDDING_MODEL="${EMBEDDING_MODEL:-nomic-embed-text}" \
+    -e GITHUB_WEBHOOK_SECRET="${GITHUB_WEBHOOK_SECRET:-}" \
+    -e GITHUB_TOKEN="${GITHUB_TOKEN:-}" \
+    -e GIT_WATCHER_ENABLED="${GIT_WATCHER_ENABLED:-true}" \
+    -e GIT_WATCHER_POLL_INTERVAL="${GIT_WATCHER_POLL_INTERVAL:-30}" \
+    -e WATCHED_BRANCHES="${WATCHED_BRANCHES:-main,develop}" \
+    -v /repos:/repos:ro \
+    ess-veracity-engine:latest
+
+# Wait for Veracity Engine
+echo "[START] Waiting for Veracity Engine health..."
+for i in {1..30}; do
+    if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+        echo "[START] Veracity Engine is healthy!"
+        break
+    fi
+    echo -n "."
+    sleep 2
+done
+
+# Start Veracity UI (Kanban Dashboard)
+echo "[START] Starting Veracity UI..."
+docker run -d \
+    --name ess-veracity-ui \
+    --restart unless-stopped \
+    --network ess-network \
+    -p 5173:80 \
+    ess-veracity-ui:latest
+
+# Wait for Veracity UI
+echo "[START] Waiting for Veracity UI health..."
+for i in {1..15}; do
+    if curl -sf http://localhost:5173/ > /dev/null 2>&1; then
+        echo "[START] Veracity UI is healthy!"
+        break
+    fi
+    echo -n "."
+    sleep 2
+done
+
 echo ""
 echo "Container status:"
 docker ps --filter "name=ess-"
@@ -295,18 +362,41 @@ else
     log_warn "Chat UI check failed"
 fi
 
+# Check Veracity Engine (Dev Context Tracking)
+log_info "Checking Veracity Engine..."
+if ssh "${VPS_USER}@${VPS_HOST}" "curl -sf http://localhost:8000/health" > /dev/null 2>&1; then
+    log_info "Veracity Engine: OK"
+else
+    log_warn "Veracity Engine check failed"
+fi
+
+# Check Veracity UI (Kanban Dashboard)
+log_info "Checking Veracity UI..."
+if ssh "${VPS_USER}@${VPS_HOST}" "curl -sf http://localhost:5173/" > /dev/null 2>&1; then
+    log_info "Veracity UI: OK"
+else
+    log_warn "Veracity UI check failed"
+fi
+
 echo ""
 echo "═══════════════════════════════════════════════════════════════════"
 echo "              Deployment Complete!"
 echo "═══════════════════════════════════════════════════════════════════"
 echo ""
-echo "  Chat UI:    https://ess.ping-gadgets.com/"
-echo "  API:        https://ess.ping-gadgets.com/api/"
-echo "  Health:     https://ess.ping-gadgets.com/health"
-echo "  Metrics:    https://ess.ping-gadgets.com/metrics"
-echo "  Monitoring: https://ess.ping-gadgets.com/monitoring/health"
+echo "  Chat UI:         https://ess.ping-gadgets.com/"
+echo "  API:             https://ess.ping-gadgets.com/api/"
+echo "  Health:          https://ess.ping-gadgets.com/health"
+echo "  Metrics:         https://ess.ping-gadgets.com/metrics"
+echo "  Monitoring:      https://ess.ping-gadgets.com/monitoring/health"
+echo ""
+echo "  Dev Context Tracking (Veracity Engine):"
+echo "    Kanban UI:     http://localhost:5173 (or via nginx proxy)"
+echo "    MCP Server:    http://localhost:8000"
+echo "    GitHub Webhook: https://ess.ping-gadgets.com/api/webhooks/github"
 echo ""
 echo "  Container logs:"
 echo "    ssh ${VPS_USER}@${VPS_HOST} docker logs -f ess-gateway"
 echo "    ssh ${VPS_USER}@${VPS_HOST} docker logs -f ess-chat-ui"
+echo "    ssh ${VPS_USER}@${VPS_HOST} docker logs -f ess-veracity-engine"
+echo "    ssh ${VPS_USER}@${VPS_HOST} docker logs -f ess-veracity-ui"
 echo ""

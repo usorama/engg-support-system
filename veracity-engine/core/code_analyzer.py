@@ -513,6 +513,10 @@ class CodeAnalyzer:
 
         return result
 
+    def analyze_file(self, file_path: str) -> List[Issue]:
+        """Analyze a single file and return issues."""
+        return self._analyze_file(Path(file_path))
+
     def _analyze_file(self, file_path: Path) -> List[Issue]:
         """Analyze a single file."""
         issues = []

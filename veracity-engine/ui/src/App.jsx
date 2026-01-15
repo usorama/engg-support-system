@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 const ForceGraph2D = React.lazy(() => import('react-force-graph-2d'));
 import neo4j from 'neo4j-driver';
-import { Search, Server, GitBranch, Code, FileText, Box, Layers, ShieldCheck, AlertTriangle, History } from 'lucide-react';
+import { Search, Server, GitBranch, Code, FileText, Box, Layers, ShieldCheck, AlertTriangle, History, LayoutGrid, Network } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { KanbanBoard } from './components';
 
 // --- Configuration ---
 const NEO4J_URI = import.meta.env.VITE_NEO4J_URI || "bolt://localhost:7687";
@@ -161,6 +162,7 @@ function App() {
   const [showAudit, setShowAudit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState("ALL");
+  const [appMode, setAppMode] = useState("graph"); // "graph" | "kanban"
   const fgRef = useRef();
 
   // 1. Fetch Projects
@@ -394,42 +396,73 @@ function App() {
           </select>
         </div>
 
+        {/* App Mode Toggle */}
         <div className="glass-panel px-4 py-2 flex items-center gap-2">
           <button
-            onClick={() => setViewMode(m => m === 'ALL' ? 'DISCOVERY' : 'ALL')}
-            className={`text-xs px-2 py-1 rounded ${viewMode === 'DISCOVERY' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+            onClick={() => setAppMode('graph')}
+            className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${appMode === 'graph' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}
           >
-            {viewMode === 'ALL' ? 'Full Graph' : 'Discovery Integration'}
+            <Network size={12} /> Graph
           </button>
           <button
-            onClick={() => setShowAudit(!showAudit)}
-            className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${showAudit ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+            onClick={() => setAppMode('kanban')}
+            className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${appMode === 'kanban' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}
           >
-            <History size={12} /> Audit Trail
+            <LayoutGrid size={12} /> Kanban
           </button>
         </div>
 
-        <div className="glass-panel px-4 py-2 text-sm text-gray-400">
-          {viewMode === 'DISCOVERY' ? 'Click nodes to drill down' : `${graphData.nodes.length} Nodes`}
-        </div>
+        {/* Graph-specific controls */}
+        {appMode === 'graph' && (
+          <div className="glass-panel px-4 py-2 flex items-center gap-2">
+            <button
+              onClick={() => setViewMode(m => m === 'ALL' ? 'DISCOVERY' : 'ALL')}
+              className={`text-xs px-2 py-1 rounded ${viewMode === 'DISCOVERY' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+            >
+              {viewMode === 'ALL' ? 'Full Graph' : 'Discovery Integration'}
+            </button>
+            <button
+              onClick={() => setShowAudit(!showAudit)}
+              className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${showAudit ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+            >
+              <History size={12} /> Audit Trail
+            </button>
+          </div>
+        )}
+
+        {appMode === 'graph' && (
+          <div className="glass-panel px-4 py-2 text-sm text-gray-400">
+            {viewMode === 'DISCOVERY' ? 'Click nodes to drill down' : `${graphData.nodes.length} Nodes`}
+          </div>
+        )}
       </div>
 
-      {/* Detail Panel */}
-      <AnimatePresence>
-        {selectedNode && (
-          <DetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
-        )}
-        {showAudit && (
-          <AuditTrail reports={reports} onSelect={(r) => setSelectedNode(r)} />
-        )}
-      </AnimatePresence>
-
-      {/* Graph Area */}
-      {loading ? (
-        <div className="flex items-center justify-center w-full h-full text-blue-400 animate-pulse">
-          Loading Graph...
+      {/* Kanban View */}
+      {appMode === 'kanban' && projectId && (
+        <div className="absolute top-20 left-4 right-4 bottom-4 glass-panel rounded-xl overflow-hidden">
+          <KanbanBoard projectId={projectId} />
         </div>
-      ) : (
+      )}
+
+      {/* Graph View */}
+      {appMode === 'graph' && (
+        <>
+          {/* Detail Panel */}
+          <AnimatePresence>
+            {selectedNode && (
+              <DetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
+            )}
+            {showAudit && (
+              <AuditTrail reports={reports} onSelect={(r) => setSelectedNode(r)} />
+            )}
+          </AnimatePresence>
+
+          {/* Graph Area */}
+          {loading ? (
+            <div className="flex items-center justify-center w-full h-full text-blue-400 animate-pulse">
+              Loading Graph...
+            </div>
+          ) : (
         <Suspense fallback={<div className="flex items-center justify-center w-full h-full text-blue-400">Loading Visualization...</div>}>
           <ForceGraph2D
             ref={fgRef}
@@ -525,20 +558,22 @@ function App() {
             d3AlphaDecay={0.01}
             cooldownTicks={100}
             onEngineStop={() => fgRef.current.zoomToFit(400)}
-          />
-        </Suspense>
-      )}
+            />
+          </Suspense>
+          )}
 
-      {/* Legend / Footer */}
-      <div className="absolute bottom-4 left-4 glass-panel p-3 text-xs flex gap-4 text-gray-400 z-10 flex-wrap max-w-2xl">
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-white"></div> Capability</div>
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-purple-500"></div> Feature</div>
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div> Doc (Fresh)</div>
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Doc (Stale)</div>
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-pink-500"></div> File</div>
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Class</div>
-        <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Function</div>
-      </div>
+          {/* Legend / Footer */}
+          <div className="absolute bottom-4 left-4 glass-panel p-3 text-xs flex gap-4 text-gray-400 z-10 flex-wrap max-w-2xl">
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-white"></div> Capability</div>
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-purple-500"></div> Feature</div>
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500"></div> Doc (Fresh)</div>
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Doc (Stale)</div>
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-pink-500"></div> File</div>
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Class</div>
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Function</div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

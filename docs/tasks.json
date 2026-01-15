@@ -1,0 +1,962 @@
+{
+  "version": "2.0",
+  "schema": "deterministic-tasks-v2",
+  "project": "engg-support-system",
+  "generatedAt": "2026-01-15T12:30:00Z",
+  "totalStories": 15,
+  "totalWaves": 5,
+  "stories": [
+    {
+      "id": "STORY-001",
+      "waveId": "wave-1",
+      "title": "Create Enhanced Neo4j Schema",
+      "description": "Neo4j schema with WorkItem, CodeChange, WorkItemEvent, and SyncQueue nodes plus enhanced indexes",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 60,
+      "preconditions": [
+        {
+          "id": "neo4j-001",
+          "type": "service_running",
+          "verification": "docker ps | grep neo4j",
+          "expected": "Container running"
+        },
+        {
+          "id": "neo4j-002",
+          "type": "connection_test",
+          "verification": "docker exec ess-neo4j cypher-shell -u neo4j -p password123 \"MATCH (n) RETURN count(n) LIMIT 1\"",
+          "expected": "Connection successful"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "schema-001",
+          "type": "file_created",
+          "verification": "ls -la veracity-engine/core/dev_context.py",
+          "expected": "File exists (≥300 lines)"
+        },
+        {
+          "id": "schema-002",
+          "type": "constraint_count",
+          "verification": "grep -c \"CREATE CONSTRAINT\\|CREATE INDEX\" veracity-engine/core/dev_context.py",
+          "expected": "≥8 constraints/indexes"
+        },
+        {
+          "id": "schema-003",
+          "type": "db_constraints_applied",
+          "verification": "docker exec ess-neo4j cypher-shell -u neo4j -p password123 \"SHOW CONSTRAINTS\" | grep -c \"work_item\"",
+          "expected": "≥2 work item constraints"
+        },
+        {
+          "id": "schema-004",
+          "type": "syntax_check",
+          "verification": "python3 -m py_compile veracity-engine/core/dev_context.py",
+          "expected": "No syntax errors"
+        },
+        {
+          "id": "schema-005",
+          "type": "function_count",
+          "verification": "grep -c \"def create_work_item\\|def record_code_change\" veracity-engine/core/dev_context.py",
+          "expected": "≥2 core functions"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "WorkItem node with all required fields",
+          "verification": "grep -n \"class WorkItem\\|uid.*project.*title.*status\" veracity-engine/core/dev_context.py"
+        },
+        {
+          "criterion": "CodeChange node with git metadata",
+          "verification": "grep -n \"class CodeChange\\|commit_hash.*author\" veracity-engine/core/dev_context.py"
+        },
+        {
+          "criterion": "Enhanced indexes per critical analysis",
+          "verification": "grep -c \"work_item_source\\|work_item_updated\\|work_item_status\" veracity-engine/core/dev_context.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/core/dev_context.py",
+        "veracity-engine/tests/test_dev_context.py"
+      ]
+    },
+    {
+      "id": "STORY-002",
+      "waveId": "wave-1",
+      "title": "Enhanced Neo4j Schema Tests",
+      "description": "Comprehensive tests for Neo4j schema including UID generation, constraints, and node operations",
+      "status": "pending",
+      "agentType": "test-writer",
+      "model": "haiku",
+      "estimatedMinutes": 45,
+      "preconditions": [
+        {
+          "id": "test-001",
+          "type": "dependency_exists",
+          "verification": "ls -la veracity-engine/core/dev_context.py",
+          "expected": "File exists from STORY-001"
+        },
+        {
+          "id": "test-002",
+          "type": "test_framework",
+          "verification": "grep -c \"pytest\" veracity-engine/requirements.txt",
+          "expected": "≥1 (pytest available)"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "test-003",
+          "type": "test_file_created",
+          "verification": "ls -la veracity-engine/tests/test_dev_context.py",
+          "expected": "File exists (≥200 lines)"
+        },
+        {
+          "id": "test-004",
+          "type": "tests_pass",
+          "verification": "pytest veracity-engine/tests/test_dev_context.py -v",
+          "expected": "All tests pass (≥15 tests)"
+        },
+        {
+          "id": "test-005",
+          "type": "test_coverage",
+          "verification": "grep -c \"test_.*uid_generation\\|test_.*constraint\\|test_.*node_creation\" veracity-engine/tests/test_dev_context.py",
+          "expected": "≥3 test categories"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "UID generation tests (deterministic)",
+          "verification": "grep -n \"test.*uid.*generation\\|test.*deterministic\" veracity-engine/tests/test_dev_context.py"
+        },
+        {
+          "criterion": "Test coverage ≥80%",
+          "verification": "pytest veracity-engine/tests/test_dev_context.py --cov=veracity_engine.core.dev_context --cov-report=term-missing"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/tests/test_dev_context.py"
+      ]
+    },
+    {
+      "id": "STORY-003",
+      "waveId": "wave-2a",
+      "title": "Basic MCP Tools (create_work_item, record_code_change, link_code_to_work)",
+      "description": "Implement 3 basic MCP tools with idempotency tokens and proper error handling",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 90,
+      "preconditions": [
+        {
+          "id": "mcp-001",
+          "type": "dependency_exists",
+          "verification": "ls -la veracity-engine/core/dev_context.py",
+          "expected": "File exists from Wave 1"
+        },
+        {
+          "id": "mcp-002",
+          "type": "tools_list_exists",
+          "verification": "grep -c \"TOOLS = \\[\" veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (tools list exists)"
+        },
+        {
+          "id": "mcp-003",
+          "type": "import_check",
+          "verification": "python3 veracity-engine/core/mcp_server.py --help",
+          "expected": "No import errors"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "mcp-004",
+          "type": "tools_added",
+          "verification": "grep -c '\"name\": \"create_work_item\"\\|\"name\": \"record_code_change\"\\|\"name\": \"link_code_to_work\"' veracity-engine/core/mcp_server.py",
+          "expected": "3 tools added"
+        },
+        {
+          "id": "mcp-005",
+          "type": "handlers_implemented",
+          "verification": "grep -c \"async def handle_create_work_item\\|async def handle_record_code_change\\|async def handle_link_code_to_work\" veracity-engine/core/mcp_server.py",
+          "expected": "3 handler functions"
+        },
+        {
+          "id": "mcp-006",
+          "type": "import_test",
+          "verification": "python3 -c \"import veracity-engine.core.mcp_server\"",
+          "expected": "No import errors"
+        },
+        {
+          "id": "mcp-007",
+          "type": "idempotency_implemented",
+          "verification": "grep -c \"idempotency_token\" veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (idempotency implemented per critical analysis)"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "create_work_item with idempotency tokens",
+          "verification": "grep -n \"idempotency_token\\|creation_token\" veracity-engine/core/mcp_server.py"
+        },
+        {
+          "criterion": "All tools return consistent JSON format",
+          "verification": "grep -c \"CallToolResult\\|markdown\" veracity-engine/core/mcp_server.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/core/mcp_server.py"
+      ]
+    },
+    {
+      "id": "STORY-004",
+      "waveId": "wave-2a",
+      "title": "Query MCP Tools (query_work_items, get_work_context, trace_file_to_work)",
+      "description": "Implement query tools with pagination and deterministic result ordering",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 75,
+      "preconditions": [
+        {
+          "id": "query-001",
+          "type": "previous_tools_exist",
+          "verification": "grep -c '\"name\": \"create_work_item\"' veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (previous tools exist)"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "query-002",
+          "type": "query_tools_added",
+          "verification": "grep -c '\"name\": \"query_work_items\"\\|\"name\": \"get_work_context\"\\|\"name\": \"trace_file_to_work\"' veracity-engine/core/mcp_server.py",
+          "expected": "3 additional tools"
+        },
+        {
+          "id": "query-003",
+          "type": "pagination_implemented",
+          "verification": "grep -c '\"offset\".*\"limit\"' veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (pagination implemented per critical analysis)"
+        },
+        {
+          "id": "query-004",
+          "type": "query_handlers_implemented",
+          "verification": "grep -c \"async def handle_query_work_items\\|async def handle_get_work_context\\|async def handle_trace_file_to_work\" veracity-engine/core/mcp_server.py",
+          "expected": "3 handler functions"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "query_work_items with pagination (offset/limit)",
+          "verification": "grep -n \"offset.*limit\\|SKIP.*LIMIT\" veracity-engine/core/mcp_server.py"
+        },
+        {
+          "criterion": "Deterministic result ordering",
+          "verification": "grep -n \"ORDER BY\" veracity-engine/core/mcp_server.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/core/mcp_server.py"
+      ]
+    },
+    {
+      "id": "STORY-005",
+      "waveId": "wave-2a",
+      "title": "Update MCP Tool (update_work_item)",
+      "description": "Implement work item updates with audit logging and state machine validation",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 45,
+      "preconditions": [
+        {
+          "id": "update-001",
+          "type": "query_tools_exist",
+          "verification": "grep -c '\"name\": \"query_work_items\"' veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (query tools exist)"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "update-002",
+          "type": "update_tool_added",
+          "verification": "grep -c '\"name\": \"update_work_item\"' veracity-engine/core/mcp_server.py",
+          "expected": "1 tool added"
+        },
+        {
+          "id": "update-003",
+          "type": "audit_events_implemented",
+          "verification": "grep -c \"WorkItemEvent\" veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (audit events created)"
+        },
+        {
+          "id": "update-004",
+          "type": "change_tracking",
+          "verification": "grep -c \"old_value.*new_value\" veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (change tracking)"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "State machine validation (per critical analysis)",
+          "verification": "grep -n \"open.*in_progress.*closed\\|status.*transition\" veracity-engine/core/mcp_server.py"
+        },
+        {
+          "criterion": "Atomic updates",
+          "verification": "grep -n \"transaction\\|WITH.*SET\" veracity-engine/core/mcp_server.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/core/mcp_server.py"
+      ]
+    },
+    {
+      "id": "STORY-006",
+      "waveId": "wave-2a",
+      "title": "MCP Tools Tests",
+      "description": "Comprehensive tests for all 7 basic MCP tools with mocking and edge cases",
+      "status": "pending",
+      "agentType": "test-writer",
+      "model": "haiku",
+      "estimatedMinutes": 120,
+      "preconditions": [
+        {
+          "id": "mcp-test-001",
+          "type": "all_basic_tools_exist",
+          "verification": "grep -c '\"name\": \"update_work_item\"' veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (all basic tools implemented)"
+        },
+        {
+          "id": "mcp-test-002",
+          "type": "test_fixtures_exist",
+          "verification": "ls -la veracity-engine/tests/conftest.py",
+          "expected": "Test fixtures exist"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "mcp-test-003",
+          "type": "test_file_created",
+          "verification": "ls -la veracity-engine/tests/test_dev_context_mcp.py",
+          "expected": "File exists (≥400 lines)"
+        },
+        {
+          "id": "mcp-test-004",
+          "type": "all_tests_pass",
+          "verification": "pytest veracity-engine/tests/test_dev_context_mcp.py -v",
+          "expected": "All tests pass (≥25 tests)"
+        },
+        {
+          "id": "mcp-test-005",
+          "type": "critical_test_patterns",
+          "verification": "grep -c \"test_.*idempotency\\|test_.*pagination\\|test_.*audit\" veracity-engine/tests/test_dev_context_mcp.py",
+          "expected": "≥3 critical test patterns"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "All 7 basic MCP tools tested",
+          "verification": "grep -c \"test.*create_work_item\\|test.*query_work_items\\|test.*update_work_item\" veracity-engine/tests/test_dev_context_mcp.py"
+        },
+        {
+          "criterion": "Mock Neo4j driver usage",
+          "verification": "grep -n \"mock.*neo4j\\|unittest.mock\" veracity-engine/tests/test_dev_context_mcp.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/tests/test_dev_context_mcp.py"
+      ]
+    },
+    {
+      "id": "STORY-007",
+      "waveId": "wave-2b",
+      "title": "Code Analyzer with Confidence Algorithm",
+      "description": "AI-driven code analysis with deterministic confidence scoring and conventional commit parsing",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 150,
+      "preconditions": [
+        {
+          "id": "analyzer-001",
+          "type": "basic_tools_complete",
+          "verification": "grep -c \"async def handle_update_work_item\" veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (basic tools complete)"
+        },
+        {
+          "id": "analyzer-002",
+          "type": "test_fixtures_dir",
+          "verification": "ls -la tests/fixtures/ || mkdir -p tests/fixtures",
+          "expected": "Test fixtures directory exists or created"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "analyzer-003",
+          "type": "analyzer_file_created",
+          "verification": "ls -la veracity-engine/core/code_analyzer.py",
+          "expected": "File exists (≥500 lines)"
+        },
+        {
+          "id": "analyzer-004",
+          "type": "confidence_algorithm_implemented",
+          "verification": "grep -c \"CONFIDENCE_WEIGHTS\\|calculate_confidence\" veracity-engine/core/code_analyzer.py",
+          "expected": "≥2 (algorithm implemented per critical analysis)"
+        },
+        {
+          "id": "analyzer-005",
+          "type": "conventional_commits_implemented",
+          "verification": "grep -c \"CONVENTIONAL_COMMIT_PATTERN\" veracity-engine/core/code_analyzer.py",
+          "expected": "≥1 (conventional commits per critical analysis)"
+        },
+        {
+          "id": "analyzer-006",
+          "type": "import_test",
+          "verification": "python3 -c \"from veracity_engine.core.code_analyzer import analyze_code_for_work; print('OK')\"",
+          "expected": "No import errors"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "Deterministic confidence algorithm",
+          "verification": "grep -n \"location_in_function_body\\|keyword_strength\\|not_in_docstring\" veracity-engine/core/code_analyzer.py"
+        },
+        {
+          "criterion": "Conventional commit type inference accuracy ≥90%",
+          "verification": "grep -n \"feat.*fix.*refactor\\|commit_type.*confidence\" veracity-engine/core/code_analyzer.py"
+        },
+        {
+          "criterion": "Deduplication for repeated TODOs",
+          "verification": "grep -n \"duplicate\\|dedup\\|group.*todos\" veracity-engine/core/code_analyzer.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/core/code_analyzer.py",
+        "tests/fixtures/sample-project/",
+        "tests/fixtures/expected_work_items.json"
+      ]
+    },
+    {
+      "id": "STORY-008",
+      "waveId": "wave-2b",
+      "title": "GitHub Client with Rate Limiting",
+      "description": "GitHub API client with rate limit detection, exponential backoff, and PAT authentication",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 90,
+      "preconditions": [
+        {
+          "id": "github-001",
+          "type": "code_analyzer_complete",
+          "verification": "ls -la veracity-engine/core/code_analyzer.py",
+          "expected": "Code analyzer complete"
+        },
+        {
+          "id": "github-002",
+          "type": "http_client_available",
+          "verification": "grep -c \"requests\\|aiohttp\" veracity-engine/requirements.txt",
+          "expected": "≥1 (HTTP client available)"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "github-003",
+          "type": "github_client_created",
+          "verification": "ls -la veracity-engine/integrations/github_client.py",
+          "expected": "File exists (≥300 lines)"
+        },
+        {
+          "id": "github-004",
+          "type": "rate_limiting_implemented",
+          "verification": "grep -c \"X-RateLimit-Remaining\\|rate_limit_remaining\" veracity-engine/integrations/github_client.py",
+          "expected": "≥2 (rate limiting per critical analysis)"
+        },
+        {
+          "id": "github-005",
+          "type": "backoff_strategy",
+          "verification": "grep -c \"exponential.*backoff\\|retry\" veracity-engine/integrations/github_client.py",
+          "expected": "≥1 (backoff strategy)"
+        },
+        {
+          "id": "github-006",
+          "type": "import_test",
+          "verification": "mkdir -p veracity-engine/integrations && python3 -c \"from veracity_engine.integrations.github_client import GitHubClient; print('OK')\"",
+          "expected": "No import errors"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "GitHub API v3 client (not GraphQL for stability)",
+          "verification": "grep -n \"api.github.com\\|v3\" veracity-engine/integrations/github_client.py"
+        },
+        {
+          "criterion": "Per-project configuration support",
+          "verification": "grep -n \"project.*config\\|auth_token_env\" veracity-engine/integrations/github_client.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/integrations/github_client.py",
+        "veracity-engine/integrations/__init__.py"
+      ]
+    },
+    {
+      "id": "STORY-009",
+      "waveId": "wave-2b",
+      "title": "AI-Driven MCP Tools (analyze_code_for_work, sync_work_to_github, auto_link_orphan_commits)",
+      "description": "Implement 3 AI-driven MCP tools with queue persistence and rollback capability",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 120,
+      "preconditions": [
+        {
+          "id": "ai-001",
+          "type": "github_client_complete",
+          "verification": "ls -la veracity-engine/integrations/github_client.py",
+          "expected": "GitHub client complete"
+        },
+        {
+          "id": "ai-002",
+          "type": "code_analyzer_complete",
+          "verification": "grep -c \"calculate_confidence\" veracity-engine/core/code_analyzer.py",
+          "expected": "≥1 (code analyzer complete)"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "ai-003",
+          "type": "ai_tools_added",
+          "verification": "grep -c '\"name\": \"analyze_code_for_work\"\\|\"name\": \"sync_work_to_github\"\\|\"name\": \"auto_link_orphan_commits\"' veracity-engine/core/mcp_server.py",
+          "expected": "3 AI tools added"
+        },
+        {
+          "id": "ai-004",
+          "type": "preview_mode_default",
+          "verification": "grep -c \"create_items.*false\" veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (preview mode default per critical analysis)"
+        },
+        {
+          "id": "ai-005",
+          "type": "queue_persistence",
+          "verification": "grep -c \"SyncQueue\" veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (queue persistence per critical analysis)"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "analyze_code_for_work with preview/create modes",
+          "verification": "grep -n \"preview\\|dry_run\\|create_items\" veracity-engine/core/mcp_server.py"
+        },
+        {
+          "criterion": "Rollback capability for false positives",
+          "verification": "grep -n \"rollback\\|delete.*auto.*confidence\" veracity-engine/core/mcp_server.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/core/mcp_server.py"
+      ]
+    },
+    {
+      "id": "STORY-010",
+      "waveId": "wave-3",
+      "title": "Enhanced Git Watcher (Commit Analysis)",
+      "description": "Extend existing git watcher with commit analysis and conventional commit parsing",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 90,
+      "preconditions": [
+        {
+          "id": "git-001",
+          "type": "existing_watcher_exists",
+          "verification": "ls -la veracity-engine/core/watcher_daemon.py",
+          "expected": "Existing watcher daemon"
+        },
+        {
+          "id": "git-002",
+          "type": "mcp_tools_available",
+          "verification": "grep -c '\"name\": \"record_code_change\"' veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (MCP tools available)"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "git-003",
+          "type": "git_watcher_created",
+          "verification": "ls -la veracity-engine/core/git_watcher.py",
+          "expected": "New file (≥250 lines)"
+        },
+        {
+          "id": "git-004",
+          "type": "parsing_functions",
+          "verification": "grep -c \"parse_work_references\\|infer_work_type\" veracity-engine/core/git_watcher.py",
+          "expected": "≥2 (parsing functions)"
+        },
+        {
+          "id": "git-005",
+          "type": "conventional_commits",
+          "verification": "grep -c \"CONVENTIONAL_COMMIT_PATTERN\" veracity-engine/core/git_watcher.py",
+          "expected": "≥1 (conventional commits per critical analysis)"
+        },
+        {
+          "id": "git-006",
+          "type": "watcher_integration",
+          "verification": "grep -c \"GitWatcher\" veracity-engine/core/watcher_daemon.py",
+          "expected": "≥1 (integration added)"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "Commit message parsing for work references (#123, JIRA-456)",
+          "verification": "grep -n \"#\\\\d+\\|JIRA-\\\\d+\" veracity-engine/core/git_watcher.py"
+        },
+        {
+          "criterion": "Auto-creation of work items for orphan commits",
+          "verification": "grep -n \"orphan.*commit\\|auto.*create\" veracity-engine/core/git_watcher.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/core/git_watcher.py",
+        "veracity-engine/core/watcher_daemon.py"
+      ]
+    },
+    {
+      "id": "STORY-011",
+      "waveId": "wave-3",
+      "title": "Git Watcher Tests",
+      "description": "Comprehensive tests for git watcher including commit parsing and auto-linking",
+      "status": "pending",
+      "agentType": "test-writer",
+      "model": "haiku",
+      "estimatedMinutes": 75,
+      "preconditions": [
+        {
+          "id": "git-test-001",
+          "type": "git_watcher_implemented",
+          "verification": "ls -la veracity-engine/core/git_watcher.py",
+          "expected": "Git watcher implemented"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "git-test-002",
+          "type": "test_file_created",
+          "verification": "ls -la veracity-engine/tests/test_git_watcher.py",
+          "expected": "File exists (≥200 lines)"
+        },
+        {
+          "id": "git-test-003",
+          "type": "all_tests_pass",
+          "verification": "pytest veracity-engine/tests/test_git_watcher.py -v",
+          "expected": "All tests pass (≥15 tests)"
+        },
+        {
+          "id": "git-test-004",
+          "type": "key_test_patterns",
+          "verification": "grep -c \"test_.*conventional_commit\\|test_.*parse_reference\\|test_.*orphan\" veracity-engine/tests/test_git_watcher.py",
+          "expected": "≥3 key test patterns"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "Conventional commit inference tests",
+          "verification": "grep -n \"test.*feat.*fix.*refactor\" veracity-engine/tests/test_git_watcher.py"
+        },
+        {
+          "criterion": "Mock git command usage",
+          "verification": "grep -n \"mock.*git\\|subprocess.*mock\" veracity-engine/tests/test_git_watcher.py"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/tests/test_git_watcher.py"
+      ]
+    },
+    {
+      "id": "STORY-012",
+      "waveId": "wave-4",
+      "title": "GitHub Webhook Handler",
+      "description": "GitHub webhook handler with HMAC signature validation and MCP integration",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 105,
+      "preconditions": [
+        {
+          "id": "webhook-001",
+          "type": "github_client_complete",
+          "verification": "ls -la veracity-engine/integrations/github_client.py",
+          "expected": "GitHub client complete (from Wave 2B)"
+        },
+        {
+          "id": "webhook-002",
+          "type": "handler_patterns_exist",
+          "verification": "grep -c \"async def handle\" gateway/src/",
+          "expected": "≥1 (handler patterns exist)"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "webhook-003",
+          "type": "webhook_handler_created",
+          "verification": "ls -la gateway/src/webhooks/github-handler.ts",
+          "expected": "File exists (≥350 lines)"
+        },
+        {
+          "id": "webhook-004",
+          "type": "signature_validation",
+          "verification": "grep -c \"HMAC.*SHA256\\|X-Hub-Signature\" gateway/src/webhooks/github-handler.ts",
+          "expected": "≥1 (signature validation)"
+        },
+        {
+          "id": "webhook-005",
+          "type": "route_added",
+          "verification": "grep -c \"POST.*webhooks.*github\" gateway/src/server.ts",
+          "expected": "≥1 (route added)"
+        },
+        {
+          "id": "webhook-006",
+          "type": "typecheck_clean",
+          "verification": "bun run typecheck",
+          "expected": "0 errors"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "Event routing (issues, pull_request, push)",
+          "verification": "grep -n \"issues\\|pull_request\\|push\" gateway/src/webhooks/github-handler.ts"
+        },
+        {
+          "criterion": "Per-project configuration support",
+          "verification": "grep -n \"project.*config\\|GITHUB_TOKEN\" gateway/src/webhooks/github-handler.ts"
+        }
+      ],
+      "filesInScope": [
+        "gateway/src/webhooks/github-handler.ts",
+        "gateway/src/server.ts"
+      ]
+    },
+    {
+      "id": "STORY-013",
+      "waveId": "wave-4",
+      "title": "GitHub Webhook Tests",
+      "description": "Integration tests for GitHub webhook handler with mock payloads and signature validation",
+      "status": "pending",
+      "agentType": "test-writer",
+      "model": "haiku",
+      "estimatedMinutes": 90,
+      "preconditions": [
+        {
+          "id": "webhook-test-001",
+          "type": "webhook_handler_complete",
+          "verification": "ls -la gateway/src/webhooks/github-handler.ts",
+          "expected": "Webhook handler complete"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "webhook-test-002",
+          "type": "test_file_created",
+          "verification": "ls -la gateway/src/test/integration/github-webhook.test.ts",
+          "expected": "File exists (≥300 lines)"
+        },
+        {
+          "id": "webhook-test-003",
+          "type": "all_tests_pass",
+          "verification": "bun test gateway/src/test/integration/github-webhook.test.ts",
+          "expected": "All tests pass (≥18 tests)"
+        },
+        {
+          "id": "webhook-test-004",
+          "type": "test_categories",
+          "verification": "grep -c \"test.*signature\\|test.*event\\|test.*validation\" gateway/src/test/integration/github-webhook.test.ts",
+          "expected": "≥3 test categories"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "Signature validation tests",
+          "verification": "grep -n \"signature.*valid\\|HMAC\" gateway/src/test/integration/github-webhook.test.ts"
+        },
+        {
+          "criterion": "Mock GitHub payload usage",
+          "verification": "grep -n \"fixtures.*github\\|mock.*payload\" gateway/src/test/integration/github-webhook.test.ts"
+        }
+      ],
+      "filesInScope": [
+        "gateway/src/test/integration/github-webhook.test.ts",
+        "gateway/src/test/fixtures/github-events.json"
+      ]
+    },
+    {
+      "id": "STORY-014",
+      "waveId": "wave-5",
+      "title": "Kanban Board UI Components",
+      "description": "React Kanban board with 4 columns, work item cards, detail modal, and filtering",
+      "status": "pending",
+      "agentType": "developer",
+      "model": "sonnet",
+      "estimatedMinutes": 180,
+      "preconditions": [
+        {
+          "id": "ui-001",
+          "type": "query_tools_available",
+          "verification": "grep -c '\"name\": \"query_work_items\"' veracity-engine/core/mcp_server.py",
+          "expected": "≥1 (query tools available from Wave 2A)"
+        },
+        {
+          "id": "ui-002",
+          "type": "ui_directory_exists",
+          "verification": "ls -la veracity-engine/ui/src/components/",
+          "expected": "UI component directory exists"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "ui-003",
+          "type": "main_components_created",
+          "verification": "ls -la veracity-engine/ui/src/components/KanbanBoard.tsx veracity-engine/ui/src/components/WorkItemCard.tsx veracity-engine/ui/src/components/WorkItemDetail.tsx",
+          "expected": "3 main components exist (≥850 lines total)"
+        },
+        {
+          "id": "ui-004",
+          "type": "react_hook_created",
+          "verification": "ls -la veracity-engine/ui/src/hooks/useWorkItems.ts",
+          "expected": "React hook exists (≥200 lines)"
+        },
+        {
+          "id": "ui-005",
+          "type": "route_added",
+          "verification": "grep -c \"kanban.*project\" veracity-engine/ui/src/App.tsx",
+          "expected": "≥1 (route added)"
+        },
+        {
+          "id": "ui-006",
+          "type": "ui_typecheck_clean",
+          "verification": "bun run typecheck",
+          "expected": "0 TypeScript errors"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "4-column Kanban board (Open, In Progress, Blocked, Closed)",
+          "verification": "grep -n \"Open\\|In Progress\\|Blocked\\|Closed\" veracity-engine/ui/src/components/KanbanBoard.tsx"
+        },
+        {
+          "criterion": "Real-time updates via polling (30s interval)",
+          "verification": "grep -n \"30.*second\\|30000.*interval\" veracity-engine/ui/src/hooks/useWorkItems.ts"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/ui/src/components/KanbanBoard.tsx",
+        "veracity-engine/ui/src/components/WorkItemCard.tsx",
+        "veracity-engine/ui/src/components/WorkItemDetail.tsx",
+        "veracity-engine/ui/src/hooks/useWorkItems.ts",
+        "veracity-engine/ui/src/components/KanbanFilters.tsx",
+        "veracity-engine/ui/src/App.tsx"
+      ]
+    },
+    {
+      "id": "STORY-015",
+      "waveId": "wave-5",
+      "title": "Kanban UI Tests & Integration",
+      "description": "Component tests, E2E tests, and integration testing for Kanban UI",
+      "status": "pending",
+      "agentType": "test-writer",
+      "model": "haiku",
+      "estimatedMinutes": 120,
+      "preconditions": [
+        {
+          "id": "ui-test-001",
+          "type": "ui_components_complete",
+          "verification": "ls -la veracity-engine/ui/src/components/KanbanBoard.tsx",
+          "expected": "UI components complete"
+        }
+      ],
+      "postconditions": [
+        {
+          "id": "ui-test-002",
+          "type": "component_tests_created",
+          "verification": "ls -la veracity-engine/ui/src/components/__tests__/KanbanBoard.test.tsx veracity-engine/ui/src/components/__tests__/WorkItemCard.test.tsx veracity-engine/ui/src/components/__tests__/WorkItemDetail.test.tsx",
+          "expected": "3 test files exist (≥400 lines total)"
+        },
+        {
+          "id": "ui-test-003",
+          "type": "all_ui_tests_pass",
+          "verification": "bun test veracity-engine/ui/src/components/__tests__/",
+          "expected": "All tests pass (≥25 tests)"
+        },
+        {
+          "id": "ui-test-004",
+          "type": "e2e_test_exists",
+          "verification": "ls -la veracity-engine/ui/e2e/kanban.spec.ts",
+          "expected": "E2E test exists (≥200 lines)"
+        }
+      ],
+      "acceptanceCriteria": [
+        {
+          "criterion": "User interaction tests (status changes)",
+          "verification": "grep -n \"status.*change\\|click.*status\" veracity-engine/ui/src/components/__tests__/"
+        },
+        {
+          "criterion": "E2E workflow tests",
+          "verification": "grep -n \"workflow\\|end.*to.*end\" veracity-engine/ui/e2e/kanban.spec.ts"
+        }
+      ],
+      "filesInScope": [
+        "veracity-engine/ui/src/components/__tests__/KanbanBoard.test.tsx",
+        "veracity-engine/ui/src/components/__tests__/WorkItemCard.test.tsx",
+        "veracity-engine/ui/src/components/__tests__/WorkItemDetail.test.tsx",
+        "veracity-engine/ui/src/hooks/__tests__/useWorkItems.test.tsx",
+        "veracity-engine/ui/e2e/kanban.spec.ts"
+      ]
+    }
+  ],
+  "qualityGates": {
+    "pythonTypecheck": {
+      "command": "cd veracity-engine && mypy core/ tests/",
+      "threshold": "0 errors",
+      "mustPass": true
+    },
+    "pythonTests": {
+      "command": "cd veracity-engine && pytest tests/ -v --cov=core --cov-report=term-missing",
+      "threshold": "≥80% coverage",
+      "mustPass": true
+    },
+    "typescriptTypecheck": {
+      "command": "cd gateway && bun run typecheck",
+      "threshold": "0 errors",
+      "mustPass": true
+    },
+    "typescriptTests": {
+      "command": "cd gateway && bun test",
+      "threshold": "All pass",
+      "mustPass": true
+    },
+    "uiTypecheck": {
+      "command": "cd veracity-engine/ui && bun run typecheck",
+      "threshold": "0 errors",
+      "mustPass": true
+    },
+    "uiTests": {
+      "command": "cd veracity-engine/ui && bun test",
+      "threshold": "≥80% coverage",
+      "mustPass": true
+    }
+  },
+  "endToEndScenarios": [
+    {
+      "name": "Proactive Work Item Generation",
+      "description": "AI analyzes code, creates work items, syncs to GitHub",
+      "verificationCommand": "docker exec ess-neo4j cypher-shell -u neo4j -p password123 \"MATCH (w:WorkItem {source: 'auto'}) RETURN count(w)\""
+    },
+    {
+      "name": "Reactive GitHub Sync",
+      "description": "GitHub issue created, webhook processed, work item created",
+      "verificationCommand": "docker exec ess-neo4j cypher-shell -u neo4j -p password123 \"MATCH (w:WorkItem {source: 'github'}) RETURN w.title, w.external_id\""
+    },
+    {
+      "name": "Git Auto-Linking",
+      "description": "Commit made with work reference, automatically linked",
+      "verificationCommand": "docker exec ess-neo4j cypher-shell -u neo4j -p password123 \"MATCH (w:WorkItem)-[:IMPLEMENTS]->(c:CodeChange) WHERE c.message CONTAINS '#123' RETURN w.title, c.commit_short\""
+    }
+  ]
+}
