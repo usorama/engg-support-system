@@ -76,6 +76,7 @@ services:
       # SECURITY: NEO4J_PASSWORD must be set in .env.prod - no weak default
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:?NEO4J_PASSWORD is required in production}
       QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ess_knowledge_base
       REDIS_URL: redis://redis:6379
       OLLAMA_URL: http://ollama:11434
       EMBEDDING_MODEL: nomic-embed-text
