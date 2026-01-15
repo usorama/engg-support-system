@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ess.http-server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>core.http_server</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/umasankr/Projects/engg-support-system/veracity-engine</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NEO4J_URI</key>
+        <string>bolt://localhost:7687</string>
+        <key>NEO4J_USER</key>
+        <string>neo4j</string>
+        <key>NEO4J_PASSWORD</key>
+        <string>password</string>
+        <key>PYTHONPATH</key>
+        <string>/Users/umasankr/Projects/engg-support-system/veracity-engine</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/ess-http-server.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/ess-http-server.error.log</string>
+</dict>
+</plist>
