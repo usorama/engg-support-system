@@ -52,7 +52,7 @@ from core.project_registry import register_project, WatchMode, get_project
 from core.build_graph import CodeGraphBuilder
 from core.file_ingestion import extract_file_metadata, extract_text_content
 from core.metrics.query_metrics import QueryMetrics
-from core.dev_context import DevContextManager
+from core.dev_context import DevContextManager, WorkItemNotFoundError
 
 # Configure logging to stderr (stdout is reserved for MCP JSON-RPC)
 logging.basicConfig(
@@ -522,6 +522,139 @@ Returns:
             },
             "required": ["work_item_uid", "code_change_uid"]
         }
+    ),
+    Tool(
+        name="query_work_items",
+        description="""Query work items with pagination and filtering.
+
+Supports:
+- Pagination via offset/limit
+- Filtering by status, priority, work_type
+- Deterministic ordering by field (created_at, updated_at, title, etc.)
+
+Returns paginated list of work items matching criteria.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {
+                    "type": "string",
+                    "description": "Project name for scoped queries"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Pagination offset (default: 0)",
+                    "default": 0
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results to return (default: 20)",
+                    "default": 20
+                },
+                "status": {
+                    "type": "string",
+                    "description": "Filter by status (open, in_progress, done, etc.)"
+                },
+                "priority": {
+                    "type": "string",
+                    "description": "Filter by priority (low, medium, high, critical)"
+                },
+                "work_type": {
+                    "type": "string",
+                    "description": "Filter by work_type (feature, bug, task, etc.)"
+                },
+                "order_by": {
+                    "type": "string",
+                    "description": "Field to order by (default: created_at)",
+                    "enum": ["created_at", "updated_at", "title", "priority", "status"],
+                    "default": "created_at"
+                },
+                "order_direction": {
+                    "type": "string",
+                    "description": "Sort direction (default: DESC)",
+                    "enum": ["ASC", "DESC"],
+                    "default": "DESC"
+                }
+            },
+            "required": ["project_name"]
+        }
+    ),
+    Tool(
+        name="get_work_context",
+        description="""Get comprehensive context for a work item.
+
+Returns:
+- Work item details
+- Related commits (CodeChange nodes)
+- Related file paths
+- Complete traceability chain
+
+Use this to understand what code changes relate to a work item.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "work_item_uid": {
+                    "type": "string",
+                    "description": "WorkItem UID to query"
+                },
+                "include_related_commits": {
+                    "type": "boolean",
+                    "description": "Include related CodeChange nodes (default: true)",
+                    "default": True
+                },
+                "include_related_files": {
+                    "type": "boolean",
+                    "description": "Include related file paths (default: true)",
+                    "default": True
+                }
+            },
+            "required": ["work_item_uid"]
+        }
+    ),
+    Tool(
+        name="trace_file_to_work",
+        description="""Trace a file to related work items (backward tracing).
+
+Finds all work items that affected a specific file through code changes.
+Useful for understanding 'why was this file changed?'
+
+Supports:
+- Confidence filtering (only show high-confidence links)
+- Backward tracing from file to work items
+- Commit history per work item
+
+Returns list of work items with trace metadata.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "File path to trace (relative to project root)"
+                },
+                "project_name": {
+                    "type": "string",
+                    "description": "Project name for scoped queries"
+                },
+                "min_confidence": {
+                    "type": "number",
+                    "description": "Minimum confidence score for links (default: 0.5)",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.5
+                },
+                "trace_direction": {
+                    "type": "string",
+                    "description": "Direction of trace (default: backward)",
+                    "enum": ["backward"],
+                    "default": "backward"
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Maximum depth of traversal (default: 3)",
+                    "default": 3
+                }
+            },
+            "required": ["file_path", "project_name"]
+        }
     )
 ]
 
@@ -572,6 +705,12 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
             return await handle_record_code_change(arguments)
         elif name == "link_code_to_work":
             return await handle_link_code_to_work(arguments)
+        elif name == "query_work_items":
+            return await handle_query_work_items(arguments)
+        elif name == "get_work_context":
+            return await handle_get_work_context(arguments)
+        elif name == "trace_file_to_work":
+            return await handle_trace_file_to_work(arguments)
         else:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Unknown tool: {name}")],
@@ -1572,6 +1711,207 @@ async def handle_link_code_to_work(args: dict) -> CallToolResult:
         )
     except Exception as e:
         logger.error(f"Failed to link code to work: {e}", exc_info=True)
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+
+
+async def handle_query_work_items(args: dict) -> CallToolResult:
+    """Query work items with pagination and filtering."""
+    project_name = args.get("project_name")
+
+    if not project_name:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": "Missing required field: project_name"
+                })
+            )],
+            isError=True
+        )
+
+    # Extract query parameters with defaults
+    offset = args.get("offset", 0)
+    limit = args.get("limit", 20)
+    status = args.get("status")
+    priority = args.get("priority")
+    work_type = args.get("work_type")
+    order_by = args.get("order_by", "created_at")
+    order_direction = args.get("order_direction", "DESC")
+
+    try:
+        manager = get_dev_context_manager(project_name)
+
+        # Execute query
+        work_items = manager.query_work_items(
+            offset=offset,
+            limit=limit,
+            status=status,
+            priority=priority,
+            work_type=work_type,
+            order_by=order_by,
+            order_direction=order_direction
+        )
+
+        logger.info(f"Queried {len(work_items)} work items for project {project_name}")
+
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": True,
+                    "data": {
+                        "work_items": work_items,
+                        "count": len(work_items),
+                        "offset": offset,
+                        "limit": limit
+                    }
+                })
+            )]
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to query work items: {e}", exc_info=True)
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+
+
+async def handle_get_work_context(args: dict) -> CallToolResult:
+    """Get comprehensive context for a work item."""
+    work_item_uid = args.get("work_item_uid")
+
+    if not work_item_uid:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": "Missing required field: work_item_uid"
+                })
+            )],
+            isError=True
+        )
+
+    include_related_commits = args.get("include_related_commits", True)
+    include_related_files = args.get("include_related_files", True)
+
+    try:
+        # Extract project from UID
+        project_name = work_item_uid.split("::")[0]
+        manager = get_dev_context_manager(project_name)
+
+        # Get work context
+        context = manager.get_work_context(
+            work_item_uid=work_item_uid,
+            include_related_commits=include_related_commits,
+            include_related_files=include_related_files
+        )
+
+        logger.info(f"Retrieved context for work item {work_item_uid}")
+
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": True,
+                    "data": context
+                })
+            )]
+        )
+
+    except WorkItemNotFoundError as e:
+        logger.error(f"Work item not found: {e}")
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+    except Exception as e:
+        logger.error(f"Failed to get work context: {e}", exc_info=True)
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": str(e)
+                })
+            )],
+            isError=True
+        )
+
+
+async def handle_trace_file_to_work(args: dict) -> CallToolResult:
+    """Trace a file to related work items."""
+    file_path = args.get("file_path")
+    project_name = args.get("project_name")
+
+    if not file_path or not project_name:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": "Missing required fields: file_path, project_name"
+                })
+            )],
+            isError=True
+        )
+
+    min_confidence = args.get("min_confidence", 0.5)
+    trace_direction = args.get("trace_direction", "backward")
+    max_depth = args.get("max_depth", 3)
+
+    try:
+        manager = get_dev_context_manager(project_name)
+
+        # Execute trace
+        traces = manager.trace_file_to_work(
+            file_path=file_path,
+            min_confidence=min_confidence,
+            trace_direction=trace_direction,
+            max_depth=max_depth
+        )
+
+        logger.info(f"Traced {len(traces)} work items for file {file_path}")
+
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": True,
+                    "data": {
+                        "traces": traces,
+                        "file_path": file_path,
+                        "count": len(traces)
+                    }
+                })
+            )]
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to trace file to work: {e}", exc_info=True)
         return CallToolResult(
             content=[TextContent(
                 type="text",

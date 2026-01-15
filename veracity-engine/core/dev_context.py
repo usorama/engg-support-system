@@ -445,3 +445,189 @@ class DevContextManager:
             })
             record = result.single()
             return record["uid"] if record else queue_uid
+
+    def query_work_items(self, offset: int = 0, limit: int = 20,
+                         status: Optional[str] = None,
+                         priority: Optional[str] = None,
+                         work_type: Optional[str] = None,
+                         order_by: str = "created_at",
+                         order_direction: str = "DESC") -> List[Dict[str, Any]]:
+        """
+        Query work items with pagination and filtering.
+
+        Args:
+            offset: Pagination offset (default: 0)
+            limit: Maximum results to return (default: 20)
+            status: Filter by status (optional)
+            priority: Filter by priority (optional)
+            work_type: Filter by work_type (optional)
+            order_by: Field to order by (default: created_at)
+            order_direction: Sort direction ASC/DESC (default: DESC)
+
+        Returns:
+            List of work item dictionaries
+        """
+        # Build WHERE clause based on filters
+        where_clauses = []
+        params = {
+            "offset": offset,
+            "limit": limit
+        }
+
+        if status:
+            where_clauses.append("w.status = $status")
+            params["status"] = status
+
+        if priority:
+            where_clauses.append("w.priority = $priority")
+            params["priority"] = priority
+
+        if work_type:
+            where_clauses.append("w.work_type = $work_type")
+            params["work_type"] = work_type
+
+        where_clause = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+        # Validate order_by to prevent injection
+        valid_order_fields = ["created_at", "updated_at", "title", "priority", "status"]
+        if order_by not in valid_order_fields:
+            order_by = "created_at"
+
+        # Validate order_direction
+        order_direction = order_direction.upper()
+        if order_direction not in ["ASC", "DESC"]:
+            order_direction = "DESC"
+
+        query = f"""
+        MATCH (w:WorkItem)
+        WHERE {where_clause}
+        RETURN w
+        ORDER BY w.{order_by} {order_direction}
+        SKIP $offset
+        LIMIT $limit
+        """
+
+        with self._driver.session() as session:
+            result = session.run(query, params)
+            work_items = []
+            for record in result:
+                work_item = dict(record["w"])
+                work_items.append(work_item)
+            return work_items
+
+    def get_work_context(self, work_item_uid: str,
+                         include_related_commits: bool = True,
+                         include_related_files: bool = True) -> Dict[str, Any]:
+        """
+        Get comprehensive context for a work item.
+
+        Args:
+            work_item_uid: WorkItem UID
+            include_related_commits: Include related CodeChange nodes (default: True)
+            include_related_files: Include related file paths (default: True)
+
+        Returns:
+            Dictionary with work_item, related_commits, and related_files
+
+        Raises:
+            WorkItemNotFoundError: If work item not found
+        """
+        # Get work item
+        work_item = self.get_work_item(work_item_uid)
+
+        context = {
+            "work_item": work_item,
+            "related_commits": [],
+            "related_files": []
+        }
+
+        # Get related commits via LINKS_TO relationship
+        if include_related_commits:
+            commit_query = """
+            MATCH (c:CodeChange)-[:LINKS_TO]->(w:WorkItem {uid: $uid})
+            RETURN c
+            ORDER BY c.timestamp DESC
+            LIMIT 50
+            """
+
+            with self._driver.session() as session:
+                result = session.run(commit_query, {"uid": work_item_uid})
+                for record in result:
+                    commit = dict(record["c"])
+                    context["related_commits"].append(commit)
+
+        # Get related files from CodeChange nodes
+        if include_related_files:
+            file_query = """
+            MATCH (c:CodeChange)-[:LINKS_TO]->(w:WorkItem {uid: $uid})
+            RETURN DISTINCT c.file_path AS file_path
+            ORDER BY c.file_path
+            LIMIT 100
+            """
+
+            with self._driver.session() as session:
+                result = session.run(file_query, {"uid": work_item_uid})
+                for record in result:
+                    context["related_files"].append(record["file_path"])
+
+        return context
+
+    def trace_file_to_work(self, file_path: str,
+                          min_confidence: float = 0.5,
+                          trace_direction: str = "backward",
+                          max_depth: int = 3) -> List[Dict[str, Any]]:
+        """
+        Trace a file to related work items (backward tracing).
+
+        Args:
+            file_path: File path to trace
+            min_confidence: Minimum confidence score for links (default: 0.5)
+            trace_direction: Direction of trace (backward only for now)
+            max_depth: Maximum depth of traversal (default: 3)
+
+        Returns:
+            List of work items with trace metadata
+        """
+        # Query for CodeChange nodes affecting this file, then traverse to WorkItems
+        query = """
+        MATCH (c:CodeChange)-[r:LINKS_TO]->(w:WorkItem)
+        WHERE c.file_path = $file_path
+          AND r.confidence >= $min_confidence
+        WITH w, r, c
+        ORDER BY r.confidence DESC, c.timestamp DESC
+        RETURN w.uid AS work_item_uid,
+               w.title AS title,
+               w.status AS status,
+               w.priority AS priority,
+               r.confidence AS confidence,
+               coalesce(r.reason, 'Direct implementation') AS link_reason,
+               collect({
+                   commit_hash: c.commit_hash,
+                   timestamp: c.timestamp,
+                   change_type: c.change_type,
+                   lines_added: c.lines_added,
+                   lines_deleted: c.lines_deleted
+               }) AS commits
+        LIMIT 50
+        """
+
+        with self._driver.session() as session:
+            result = session.run(query, {
+                "file_path": file_path,
+                "min_confidence": min_confidence
+            })
+
+            traces = []
+            for record in result:
+                trace = {
+                    "work_item_uid": record["work_item_uid"],
+                    "title": record["title"],
+                    "status": record["status"],
+                    "priority": record["priority"],
+                    "confidence": record["confidence"],
+                    "link_reason": record["link_reason"],
+                    "commits": record["commits"]
+                }
+                traces.append(trace)
+
+            return traces
