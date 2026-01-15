@@ -238,6 +238,19 @@ function findFiles(
       continue;
     }
 
+    // Skip large generated lock files (cause embedding timeouts)
+    if (
+      item === "package-lock.json" ||
+      item === "bun.lockb" ||
+      item === "yarn.lock" ||
+      item === "pnpm-lock.yaml" ||
+      item === "Cargo.lock" ||
+      item === "poetry.lock" ||
+      item === "Gemfile.lock"
+    ) {
+      continue;
+    }
+
     const stat = statSync(fullPath);
 
     if (stat.isDirectory()) {
