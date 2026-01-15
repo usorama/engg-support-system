@@ -130,3 +130,60 @@ groups:
         annotations:
           summary: "High Gateway CPU usage"
           description: "Gateway CPU usage is above 80% for 10 minutes"
+
+  - name: ess-self-healing
+    rules:
+      # Ollama model loading issues
+      - alert: OllamaModelNotLoaded
+        expr: |
+          increase(ess_http_requests_total{path="/api/query",status="500"}[5m]) > 5
+          and on() ess_service_health{service="ollama"} == 1
+        for: 2m
+        labels:
+          severity: warning
+          recovery_action: warmup_model
+        annotations:
+          summary: "Ollama models may need warming up"
+          description: "High error rate with Ollama healthy suggests models need loading"
+
+      # Container needs restart (consecutive failures detected)
+      - alert: ServiceNeedsRestart
+        expr: |
+          count_over_time(
+            (ess_service_health == 0)[5m:30s]
+          ) >= 5
+        for: 1m
+        labels:
+          severity: critical
+          recovery_action: restart_container
+        annotations:
+          summary: "Service {{ $labels.service }} needs container restart"
+          description: "Service has failed 5+ health checks in 5 minutes"
+
+      # Cache needs clearing (latency spike)
+      - alert: LatencySpikeDetected
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(ess_query_duration_seconds_bucket[5m])) by (le)
+          ) > 3 * histogram_quantile(0.95,
+            sum(rate(ess_query_duration_seconds_bucket[1h])) by (le)
+          )
+        for: 5m
+        labels:
+          severity: warning
+          recovery_action: clear_cache
+        annotations:
+          summary: "Latency spike detected - cache may need clearing"
+          description: "P95 latency is 3x the hourly average"
+
+      # Recovery failed - needs human escalation
+      - alert: RecoveryFailed
+        expr: |
+          increase(ess_recovery_attempts_total{success="false"}[1h]) >= 3
+        for: 1m
+        labels:
+          severity: critical
+          recovery_action: escalate
+        annotations:
+          summary: "Recovery failed for {{ $labels.service }}"
+          description: "3+ failed recovery attempts in the last hour - human intervention required"

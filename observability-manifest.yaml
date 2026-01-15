@@ -1,0 +1,194 @@
+# ESS Observability Manifest
+# Configuration for ping-guard observability framework
+# Version: 1.0
+
+version: "1.0"
+
+project:
+  name: "engg-support-system"
+  environment: "${NODE_ENV:-production}"
+  description: "AI-powered engineering intelligence system"
+
+# Service definitions for health monitoring
+services:
+  - name: "gateway"
+    type: "nodejs"
+    framework: "express"
+    container:
+      name: "ess-gateway"
+      compose_service: "gateway"
+    health:
+      endpoint: "/health"
+      port: 3001
+      timeout_ms: 10000
+      interval_ms: 30000
+    metrics:
+      endpoint: "/metrics"
+      format: "prometheus"
+    critical: true  # Gateway down = system down
+
+  - name: "neo4j"
+    type: "database"
+    container:
+      name: "ess-neo4j"
+      compose_service: "neo4j"
+    health:
+      port: 7474
+      custom_check: "http_status_200"
+      timeout_ms: 15000
+      interval_ms: 30000
+    critical: true
+
+  - name: "qdrant"
+    type: "vector_database"
+    container:
+      name: "ess-qdrant"
+      compose_service: "qdrant"
+    health:
+      port: 6333
+      endpoint: "/healthz"
+      timeout_ms: 10000
+      interval_ms: 30000
+    critical: true
+
+  - name: "redis"
+    type: "cache"
+    container:
+      name: "ess-redis"
+      compose_service: "redis"
+    health:
+      port: 6379
+      custom_check: "redis_ping"
+      timeout_ms: 5000
+      interval_ms: 15000
+    critical: false  # Degraded mode possible without cache
+
+  - name: "ollama"
+    type: "llm"
+    container:
+      name: "ess-ollama"
+      compose_service: "ollama"
+    health:
+      port: 11434
+      endpoint: "/api/tags"
+      timeout_ms: 30000
+      interval_ms: 60000
+    critical: true
+
+  - name: "veracity-engine"
+    type: "mcp_server"
+    container:
+      name: "ess-veracity-engine"
+      compose_service: "veracity-engine"
+    health:
+      endpoint: "/health"
+      port: 8000
+      timeout_ms: 10000
+      interval_ms: 30000
+    critical: false
+
+# Alert configuration
+alerts:
+  thresholds:
+    consecutive_failures: 5
+    latency_warning_ms: 5000
+    latency_critical_ms: 15000
+    error_rate_warning: 0.05  # 5%
+    error_rate_critical: 0.1  # 10%
+
+  channels:
+    - type: "log"
+      enabled: true
+    - type: "webhook"
+      enabled: true
+      url: "http://gateway:3001/webhooks/alerts"
+    - type: "slack"
+      enabled: "${ALERT_SLACK_ENABLED:-false}"
+      webhook_url: "${ALERT_SLACK_WEBHOOK:-}"
+      channel: "#ess-alerts"
+
+# Recovery configuration (self-healing)
+recovery:
+  enabled: true
+  max_attempts_per_hour: 5
+  min_confidence_threshold: 0.7  # For LLM-based RCA decisions
+  global_cooldown_ms: 60000
+
+  # LLM configuration for RCA
+  llm:
+    url: "http://ollama:11434"
+    model: "llama3.2"
+    timeout_ms: 30000
+    max_tokens: 1024
+    temperature: 0.3
+
+  # Recovery recipes
+  recipes:
+    - name: "restart_on_failure"
+      type: "restart_container"
+      trigger:
+        condition: "consecutive_failures"
+        threshold: 5
+      services: ["neo4j", "qdrant", "redis", "ollama"]
+      max_attempts: 3
+      cooldown_ms: 60000
+      safety: "safe"
+
+    - name: "clear_cache_high_latency"
+      type: "clear_cache"
+      trigger:
+        condition: "high_latency"
+        threshold_ms: 10000
+      services: ["gateway", "redis"]
+      max_attempts: 1
+      cooldown_ms: 300000
+      safety: "safe"
+      patterns: ["${service}:*", "query:*"]
+
+    - name: "warmup_after_restart"
+      type: "warmup"
+      trigger:
+        condition: "container_started"
+      services: ["ollama"]
+      max_attempts: 1
+      cooldown_ms: 120000
+      safety: "safe"
+      models: ["nomic-embed-text", "llama3.2"]
+
+    - name: "escalate_repeated_failures"
+      type: "escalate"
+      trigger:
+        condition: "recovery_failed"
+        after_attempts: 3
+      severity: "critical"
+      notify: true
+
+# Metrics configuration
+metrics:
+  prefix: "ess"
+  retention_days: 8
+
+# Log configuration
+logging:
+  level: "${LOG_LEVEL:-info}"
+  format: "json"
+  retention_days: 8
+
+# Exporters
+exporters:
+  prometheus:
+    enabled: true
+    port: 9090
+    scrape_interval: 15s
+
+  loki:
+    enabled: true
+    url: "http://loki:3100"
+    labels:
+      - "service"
+      - "level"
+      - "requestId"
+
+  grafana:
+    enabled: true
+    port: 3003

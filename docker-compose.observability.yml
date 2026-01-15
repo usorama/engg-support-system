@@ -1,0 +1,119 @@
+# ESS Observability Stack Overlay
+# Extends docker-compose.prod.yml with Prometheus, Grafana, Loki, Alertmanager
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.observability.yml up -d
+
+services:
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: ess-prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=8d'  # 1 week + buffer
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Grafana - Dashboards & Visualization
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: ess-grafana
+    restart: always
+    ports:
+      - "3003:3000"  # 3003 to avoid conflict with chat-ui
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3003}
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Loki - Log Aggregation
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: ess-loki
+    restart: always
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infra/loki:/etc/loki:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki-config.yml
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Promtail - Log Shipping
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: ess-promtail
+    restart: always
+    volumes:
+      - ./infra/promtail:/etc/promtail:ro
+      - /var/log:/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail-config.yml
+    depends_on:
+      - loki
+    networks:
+      - ess_network
+
+  # Alertmanager - Alert Routing & Notification
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: ess-alertmanager
+    restart: always
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./infra/alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - ess_network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  alertmanager_data:
