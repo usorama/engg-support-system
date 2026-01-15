@@ -27,6 +27,7 @@
   "author": "engg-support-system",
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "@qdrant/js-client-rest": "^1.12.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
