@@ -36,7 +36,7 @@ services:
     container_name: ess-grafana
     restart: always
     ports:
-      - "3003:3000"  # 3003 to avoid conflict with chat-ui
+      - "3004:3000"  # 3004 to avoid conflicts
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
