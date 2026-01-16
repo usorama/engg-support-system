@@ -20,7 +20,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>NEO4J_URI</key>
-        <string>bolt://localhost:7687</string>
+        <string>bolt://localhost:7688</string>
         <key>NEO4J_USER</key>
         <string>neo4j</string>
         <key>NEO4J_PASSWORD</key>

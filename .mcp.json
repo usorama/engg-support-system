@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.dev/mcp",
+      "headers": {}
+    },
+    "ess-veracity": {
+      "command": "python3",
+      "args": ["/Users/umasankr/Projects/engg-support-system/veracity-engine/core/mcp_server.py"],
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7688",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "password"
+      }
+    }
+  }
+}
