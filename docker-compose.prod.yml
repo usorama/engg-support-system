@@ -1,47 +1,19 @@
-# ESS Production Docker Compose with TLS
-# Uses Caddy for automatic HTTPS via Let's Encrypt
+# ESS Production Docker Compose
+# TLS termination handled by nginx (systemd) on host - NOT Docker
+#
+# Architecture:
+#   Internet -> nginx (host:443) -> Docker containers (internal ports)
+#
+# Why nginx instead of Caddy?
+#   - VPS already uses nginx for multiple sites (pinglearn, etc.)
+#   - nginx managed by systemd = auto-start on boot
+#   - Let's Encrypt via certbot (already configured)
+#   - If Docker crashes, nginx can still serve error pages
 
 version: '3.8'
 
 services:
-  # TLS Termination (Edge)
-  # NOTE: Caddy is DISABLED - we use nginx (systemd) for TLS termination on VPS
-  # If you want to use Caddy instead of nginx, uncomment the ports below
-  # and mask nginx: sudo systemctl mask nginx
-  caddy:
-    image: caddy:2-alpine
-    container_name: ess-caddy
-    restart: "no"  # DISABLED - nginx handles TLS
-    profiles:
-      - caddy-tls  # Only starts with: docker compose --profile caddy-tls up
-    # ports:  # DISABLED - conflicts with nginx on port 80/443
-    #   - "80:80"
-    #   - "443:443"
-    #   - "8080:8080"
-    expose:
-      - "80"
-      - "443"
-      - "8080"
-    volumes:
-      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-      - caddy_logs:/var/log/caddy
-    environment:
-      ESS_DOMAIN: ${ESS_DOMAIN:-localhost}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
-    depends_on:
-      gateway:
-        condition: service_healthy
-    networks:
-      - ess_network
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Chat UI (React PWA)
+  # Chat UI (React PWA) - served via nginx proxy
   chat-ui:
     build:
       context: ./gateway/ui
@@ -54,19 +26,20 @@ services:
     container_name: ess-chat-ui
     restart: always
     ports:
-      - "3002:80"  # Expose to host for nginx reverse proxy
+      - "3002:80"  # nginx proxies / -> localhost:3002
     depends_on:
       gateway:
         condition: service_healthy
     networks:
       - ess_network
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/health"]
+      # Note: Chat UI is static files, no /health endpoint - just check root
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # HTTP Gateway (exposed to host for nginx reverse proxy)
+  # HTTP Gateway - served via nginx proxy
   gateway:
     build:
       context: ./gateway
@@ -74,7 +47,7 @@ services:
     container_name: ess-gateway
     restart: always
     ports:
-      - "3001:3001"  # Expose to host for nginx reverse proxy
+      - "3001:3001"  # nginx proxies /api/* -> localhost:3001
     expose:
       - "3001"
     environment:
@@ -280,9 +253,6 @@ networks:
     driver: bridge
 
 volumes:
-  caddy_data:
-  caddy_config:
-  caddy_logs:
   neo4j_data:
   neo4j_logs:
   qdrant_data:

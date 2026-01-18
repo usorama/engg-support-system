@@ -78,22 +78,26 @@ ssh devuser@72.60.204.156 "sudo ss -tlnp | grep ':443'"
 - Fix: Ensure both use the same key from `.env.prod`
 
 ### Port 443 conflict (nginx can't start)
-- Caddy container is stealing port 443
-- Fix: `docker stop ess-caddy && docker update --restart=no ess-caddy`
+- Another process is using port 443
+- Check: `sudo ss -tlnp | grep ':443'`
+- Common fix: stop any rogue Docker containers binding to host ports
 
 ### nginx is masked
 - Previous docker-compose setup masked nginx
 - Fix: `sudo systemctl unmask nginx && sudo systemctl start nginx`
 
-## Architecture Decision: nginx vs Caddy
+## Architecture Decision: nginx Only
 
-**We use nginx (systemd) for TLS termination, NOT Caddy (Docker).**
+**We use nginx (systemd) for TLS termination. Caddy has been completely removed.**
 
 Reasons:
 - nginx is managed by systemd (auto-start on boot)
-- Let's Encrypt certs via certbot
-- Better integration with VPS infrastructure
-- Caddy in docker-compose is disabled (profiles: caddy-tls)
+- Let's Encrypt certs via certbot (already configured for VPS)
+- VPS already uses nginx for multiple sites (pinglearn, etc.)
+- If Docker crashes, nginx can still serve error pages
+- Single TLS termination point = simpler architecture
+
+**Caddy Status**: Removed from docker-compose.prod.yml and VPS (Jan 2026)
 
 ## Rollback
 
@@ -110,8 +114,8 @@ ssh devuser@72.60.204.156 "sudo cp /etc/nginx/sites-available/ess.ping-gadgets.c
 
 ## Lessons Learned (Encoded in Script)
 
-1. **Always pass VITE_ESS_API_KEY** during Chat UI build
-2. **Stop Caddy before starting nginx** - port conflict prevention
-3. **Unmask nginx** - may be masked from previous setups
-4. **Verify nginx owns port 443** - not docker-proxy
-5. **E2E API test** - don't just check health, test actual queries
+1. **Always pass VITE_ESS_API_KEY** during Chat UI build (Vite embeds at build time)
+2. **Verify nginx owns port 443** - check with `sudo ss -tlnp | grep ':443'`
+3. **Unmask nginx** - may be masked from previous Docker setups
+4. **E2E API test** - don't just check health, test actual authenticated queries
+5. **Single TLS termination** - nginx only, no Docker-based TLS proxies

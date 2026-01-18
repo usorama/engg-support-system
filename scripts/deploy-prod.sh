@@ -158,11 +158,15 @@ docker rm ess-veracity-engine 2>/dev/null || true
 docker stop ess-veracity-ui 2>/dev/null || true
 docker rm ess-veracity-ui 2>/dev/null || true
 
-# CRITICAL: Stop Caddy to free ports 80/443 for nginx
-# Caddy conflicts with nginx - we use nginx for TLS termination
-echo "[STOP] Stopping Caddy (if running) to free ports 80/443..."
+# CLEANUP: Remove any legacy Caddy containers
+# Architecture decision: nginx for TLS termination (not Caddy)
+# See: .claude/skills/deploy-vps.md for rationale
+echo "[CLEANUP] Removing Caddy if present (we use nginx for TLS)..."
 docker update --restart=no ess-caddy 2>/dev/null || true
 docker stop ess-caddy 2>/dev/null || true
+docker rm ess-caddy 2>/dev/null || true
+docker volume rm engg-support-system_caddy_data 2>/dev/null || true
+docker volume rm engg-support-system_caddy_config 2>/dev/null || true
 
 # Also stop any legacy processes
 pkill -f "node dist/server.js" 2>/dev/null || true
