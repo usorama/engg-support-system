@@ -97,17 +97,28 @@ log_info "Code synced to VPS"
 if [[ "$SKIP_BUILD" != "true" ]]; then
     log_step "3/7: Building containers on VPS..."
 
-    ssh "${VPS_USER}@${VPS_HOST}" << 'BUILD_EOF'
+    # First, get the API key to pass to the build
+    ESS_API_KEY_VALUE=$(grep '^ESS_API_KEY=' "${ROOT_DIR}/.env.prod" | cut -d= -f2)
+
+    ssh "${VPS_USER}@${VPS_HOST}" "ESS_API_KEY='${ESS_API_KEY_VALUE}'" << 'BUILD_EOF'
 set -e
 cd /home/devuser/Projects/engg-support-system
+
+# Load environment for build args
+set -a
+source .env.prod
+set +a
 
 # Build Gateway
 echo "[BUILD] Building Gateway..."
 docker build -t ess-gateway:latest -f gateway/Dockerfile gateway/
 
-# Build Chat UI
-echo "[BUILD] Building Chat UI..."
-docker build -t ess-chat-ui:latest -f gateway/ui/Dockerfile gateway/ui/
+# Build Chat UI (MUST pass API key as build arg for Vite)
+echo "[BUILD] Building Chat UI with API key..."
+docker build -t ess-chat-ui:latest \
+    --build-arg VITE_ESS_API_KEY="${ESS_API_KEY}" \
+    --build-arg VITE_API_URL="/api" \
+    -f gateway/ui/Dockerfile gateway/ui/
 
 # Build Veracity Engine (Dev Context Tracking)
 echo "[BUILD] Building Veracity Engine..."
