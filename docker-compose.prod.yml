@@ -5,14 +5,23 @@ version: '3.8'
 
 services:
   # TLS Termination (Edge)
+  # NOTE: Caddy is DISABLED - we use nginx (systemd) for TLS termination on VPS
+  # If you want to use Caddy instead of nginx, uncomment the ports below
+  # and mask nginx: sudo systemctl mask nginx
   caddy:
     image: caddy:2-alpine
     container_name: ess-caddy
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"  # Internal health check
+    restart: "no"  # DISABLED - nginx handles TLS
+    profiles:
+      - caddy-tls  # Only starts with: docker compose --profile caddy-tls up
+    # ports:  # DISABLED - conflicts with nginx on port 80/443
+    #   - "80:80"
+    #   - "443:443"
+    #   - "8080:8080"
+    expose:
+      - "80"
+      - "443"
+      - "8080"
     volumes:
       - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -158,6 +158,12 @@ docker rm ess-veracity-engine 2>/dev/null || true
 docker stop ess-veracity-ui 2>/dev/null || true
 docker rm ess-veracity-ui 2>/dev/null || true
 
+# CRITICAL: Stop Caddy to free ports 80/443 for nginx
+# Caddy conflicts with nginx - we use nginx for TLS termination
+echo "[STOP] Stopping Caddy (if running) to free ports 80/443..."
+docker update --restart=no ess-caddy 2>/dev/null || true
+docker stop ess-caddy 2>/dev/null || true
+
 # Also stop any legacy processes
 pkill -f "node dist/server.js" 2>/dev/null || true
 
@@ -333,17 +339,38 @@ sudo cp /etc/nginx/sites-available/ess.ping-gadgets.com \
 sudo cp /tmp/ess.ping-gadgets.com.conf /etc/nginx/sites-available/ess.ping-gadgets.com
 sudo ln -sf /etc/nginx/sites-available/ess.ping-gadgets.com /etc/nginx/sites-enabled/
 
+# CRITICAL: Ensure nginx is unmasked and can start
+# (may have been masked by docker-compose setups that use Caddy)
+echo "[NGINX] Ensuring nginx is unmasked and enabled..."
+sudo systemctl unmask nginx 2>/dev/null || true
+sudo systemctl enable nginx 2>/dev/null || true
+
 # Test nginx config
 if sudo nginx -t; then
-    sudo systemctl reload nginx
-    echo "nginx reloaded successfully"
+    # Start or reload nginx based on current state
+    if systemctl is-active --quiet nginx; then
+        sudo systemctl reload nginx
+        echo "nginx reloaded successfully"
+    else
+        sudo systemctl start nginx
+        echo "nginx started successfully"
+    fi
 else
     echo "nginx config test failed, rolling back..."
     sudo cp /etc/nginx/sites-available/ess.ping-gadgets.com.bak \
         /etc/nginx/sites-available/ess.ping-gadgets.com 2>/dev/null || true
-    sudo systemctl reload nginx
+    sudo systemctl reload nginx 2>/dev/null || sudo systemctl start nginx
     exit 1
 fi
+
+# Final verification that nginx owns port 443
+if ! sudo ss -tlnp | grep -q 'nginx.*:443'; then
+    echo "ERROR: nginx is not listening on port 443!"
+    echo "Checking what's using port 443:"
+    sudo ss -tlnp | grep ':443'
+    exit 1
+fi
+echo "nginx verified on port 443"
 NGINX_EOF
 
 log_info "nginx updated"
@@ -371,6 +398,37 @@ if curl -sf "https://ess.ping-gadgets.com/" -o /dev/null; then
     log_info "Chat UI: OK"
 else
     log_warn "Chat UI check failed"
+fi
+
+# CRITICAL: Verify API authentication works end-to-end
+log_info "Verifying API authentication (E2E test)..."
+source "${ROOT_DIR}/.env.prod"
+API_RESPONSE=$(curl -sf -X POST "https://ess.ping-gadgets.com/api/query" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${ESS_API_KEY}" \
+    -d '{"query": "deployment test", "project": "engg-support-system"}' 2>&1 || echo "FAILED")
+
+if echo "$API_RESPONSE" | grep -q '"status":"success"'; then
+    log_info "API Authentication: OK (query returned success)"
+else
+    log_error "API Authentication FAILED!"
+    log_error "Response: ${API_RESPONSE:0:200}"
+    log_error "Check if VITE_ESS_API_KEY was passed during Chat UI build"
+    exit 1
+fi
+
+# Verify API key is in Chat UI bundle
+log_info "Checking API key in Chat UI bundle..."
+if curl -sf "https://ess.ping-gadgets.com/assets/index-*.js" 2>/dev/null | grep -qo "${ESS_API_KEY:0:8}"; then
+    log_info "API Key in bundle: OK"
+else
+    # Try to find any JS bundle
+    BUNDLE_CHECK=$(ssh "${VPS_USER}@${VPS_HOST}" "docker exec ess-chat-ui grep -r '${ESS_API_KEY:0:8}' /usr/share/nginx/html/assets/ 2>/dev/null | head -1")
+    if [[ -n "$BUNDLE_CHECK" ]]; then
+        log_info "API Key in bundle: OK (verified via container)"
+    else
+        log_warn "API Key may not be in bundle - check VITE_ESS_API_KEY build arg"
+    fi
 fi
 
 # Check Veracity Engine (Dev Context Tracking)
